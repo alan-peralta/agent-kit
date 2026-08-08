@@ -134,7 +134,10 @@ class Agent
             }
 
             $providerName = $this->providerName ?? $this->config['default'];
-            $recoveryContext = new RecoveryContext(provider: $providerName);
+            $recoveryContext = new RecoveryContext(
+                provider: $providerName,
+                conversationId: $this->conversationId,
+            );
 
             $response = $this->pipeline->execute(
                 function (RecoveryContext $context) use ($messages, $tools) {
