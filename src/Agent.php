@@ -108,7 +108,10 @@ class Agent
      */
     public function send(string $userMessage): AgentResponse
     {
-        $provider = $this->resolveProvider();
+        // Fail-fast: valida o provider inicial antes de carregar histórico e persistir
+        // a mensagem do usuário. O retorno não é usado — o provider efetivo é resolvido
+        // novamente dentro do pipeline (que pode trocar de provider em caso de fallback).
+        $this->resolveProvider();
         $tools = $this->resolveTools();
         $context = $this->context ?? new Context();
         $convo = $this->resolveConversation();
@@ -134,8 +137,8 @@ class Agent
             $recoveryContext = new RecoveryContext(provider: $providerName);
 
             $response = $this->pipeline->execute(
-                function (RecoveryContext $ctx) use ($messages, $tools) {
-                    $provider = $this->container->make("agent-kit.provider.{$ctx->provider}");
+                function (RecoveryContext $context) use ($messages, $tools) {
+                    $provider = $this->container->make("agent-kit.provider.{$context->provider}");
 
                     return $provider->chat(
                         messages: $messages,
