@@ -36,7 +36,7 @@ OPENAI_API_KEY=sk-xxxxx              # necessário para embeddings do RAG
 AGENT_CONVERSATION_DRIVER=redis
 AGENT_CONVERSATION_REDIS=default
 
-# Knowledge Base (PostgreSQL + pgvector)
+# Knowledge Base (PostgreSQL + pgvector, ou Qdrant)
 AGENT_KNOWLEDGE_STORE=pgvector
 AGENT_KNOWLEDGE_DB=pgsql
 AGENT_EMBEDDER=openai
@@ -44,6 +44,16 @@ AGENT_EMBEDDER=openai
 # Logging (opcional)
 AGENT_LOGGING=true
 AGENT_LOG_CHANNEL=stack
+
+# Error Recovery (opcional - retry, fallback entre providers e alertas)
+AGENT_ERROR_RECOVERY_ENABLED=true
+AGENT_DISCORD_ALERTS_ENABLED=false
+AGENT_DISCORD_WEBHOOK_URL=
+AGENT_DISCORD_MENTION=
+
+# Analytics & Monitoring (opcional)
+AGENT_KIT_ANALYTICS_ENABLED=true
+AGENT_KIT_ANALYTICS_PERSIST=false
 ```
 
 ### Opções de Provider:
@@ -313,6 +323,28 @@ exit
 
 ---
 
+## 🛡️ Passo 10: Error Recovery e Analytics (opcional)
+
+O Agent Kit já vem com recuperação automática de falhas e observabilidade prontas,
+bastando habilitar via `.env`:
+
+- **Retry com backoff exponencial** por tipo de erro (timeout, rate limit, erro de
+  servidor) e **fallback automático** para outro provider configurado.
+- **Alerta no Discord** quando um fallback é ativado ou quando todos os providers falham.
+- **Eventos de analytics** (uso de tokens, tool calls, latência, retries), com
+  persistência opcional na tabela `agent_kit_metrics`.
+
+```bash
+php artisan vendor:publish --tag=agent-kit-migrations
+php artisan migrate  # cria a tabela agent_kit_metrics, se ainda não existir
+```
+
+Ajuste as políticas de retry por tipo de erro e as opções de analytics em
+`config/agent-kit.php` → `error_recovery` e `analytics`. Detalhes completos em
+[README.md](README.md#error-recovery) e [README.md](README.md#analytics--monitoring).
+
+---
+
 ## 📊 Fluxo Completo
 
 ```
@@ -348,6 +380,7 @@ Usuário envia: "Quero um produto barato e também saber as políticas"
 - [ ] Tool customizada criada
 - [ ] Documentos indexados
 - [ ] Testado no tinker
+- [ ] Error Recovery e Analytics avaliados (habilitados ou intencionalmente desligados)
 
 Se tudo marcado → **PRONTO PARA PRODUÇÃO!**
 

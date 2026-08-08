@@ -32,6 +32,10 @@ AGENT_CONVERSATION_DRIVER=database
 AGENT_KNOWLEDGE_DB=pgsql_knowledge
 ```
 
+Veja [`.env.example`](.env.example) para a lista completa de variáveis, incluindo
+conversation stores, embedders, Qdrant, [Error Recovery](#error-recovery) e
+[Analytics](#analytics--monitoring).
+
 ## Uso básico
 
 ```php
