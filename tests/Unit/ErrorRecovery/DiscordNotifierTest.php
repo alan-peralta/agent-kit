@@ -3,6 +3,8 @@
 namespace Peralta\AgentKit\Tests\Unit\ErrorRecovery;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Mockery;
 use Peralta\AgentKit\ErrorRecovery\Notifiers\DiscordNotifier;
 use Peralta\AgentKit\ErrorRecovery\Notifiers\NullNotifier;
 use Peralta\AgentKit\Tests\TestCase;
@@ -56,12 +58,14 @@ class DiscordNotifierTest extends TestCase
 
     public function test_null_notifier_is_a_no_op()
     {
+        Http::fake();
+
         $notifier = new NullNotifier();
 
         $notifier->notifyFailure('anything', []);
         $notifier->notifyFallback('anthropic', 'reason');
 
-        $this->assertTrue(true); // não deve lançar exception
+        Http::assertNothingSent();
     }
 
     public function test_does_not_throw_when_webhook_request_fails()
@@ -76,11 +80,15 @@ class DiscordNotifierTest extends TestCase
         // não deve lançar exception mesmo com resposta de erro
         $notifier->notifyFailure('teste', []);
 
-        $this->assertTrue(true);
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://discord.com/api/webhooks/123/abc'
+                && str_contains($request['content'], 'teste');
+        });
     }
 
     public function test_does_not_throw_when_connection_fails()
     {
+        Log::spy();
         Http::fake(function () {
             throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
         });
@@ -93,6 +101,10 @@ class DiscordNotifierTest extends TestCase
         // não deve lançar exception mesmo com falha de conexão
         $notifier->notifyFailure('teste', []);
 
-        $this->assertTrue(true);
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->with('[agent-kit] Falha ao enviar alerta pro Discord', Mockery::on(
+                fn($context) => str_contains($context['error'], 'Connection refused')
+            ));
     }
 }
