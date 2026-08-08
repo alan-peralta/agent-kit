@@ -3,6 +3,7 @@
 namespace Peralta\AgentKit\Tests\Unit\Support;
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Peralta\AgentKit\Events\TokenUsageRecorded;
 use Peralta\AgentKit\Support\SafeEventDispatcher;
 use Peralta\AgentKit\Tests\TestCase;
@@ -11,6 +12,10 @@ class SafeEventDispatcherTest extends TestCase
 {
     public function test_dispatch_swallows_listener_exceptions()
     {
+        config(['agent-kit.logging.enabled' => false]);
+
+        Log::spy();
+
         Event::listen(TokenUsageRecorded::class, function () {
             throw new \RuntimeException('boom');
         });
@@ -23,7 +28,13 @@ class SafeEventDispatcherTest extends TestCase
             outputTokens: 5,
         ));
 
-        $this->assertTrue(true);
+        Log::shouldHaveReceived('warning')->once()->with(
+            '[agent-kit] Falha ao despachar evento de analytics',
+            [
+                'event' => TokenUsageRecorded::class,
+                'error' => 'boom',
+            ]
+        );
     }
 
     public function test_dispatch_does_nothing_when_analytics_disabled()
