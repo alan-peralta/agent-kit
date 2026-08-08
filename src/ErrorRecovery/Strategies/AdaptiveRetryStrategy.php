@@ -33,7 +33,7 @@ class AdaptiveRetryStrategy implements RetryStrategy
         $delay = (int) min($initial * ($multiplier ** ($attempt - 1)), $max);
 
         if ($jitter) {
-            $delay += random_int(0, $delay);
+            $delay = min($delay + random_int(0, $delay), $max);
         }
 
         return $delay;
