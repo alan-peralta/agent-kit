@@ -63,4 +63,36 @@ class DiscordNotifierTest extends TestCase
 
         $this->assertTrue(true); // não deve lançar exception
     }
+
+    public function test_does_not_throw_when_webhook_request_fails()
+    {
+        Http::fake(['discord.com/*' => Http::response(['error' => 'boom'], 500)]);
+
+        $notifier = new DiscordNotifier(
+            webhookUrl: 'https://discord.com/api/webhooks/123/abc',
+            mention: null,
+        );
+
+        // não deve lançar exception mesmo com resposta de erro
+        $notifier->notifyFailure('teste', []);
+
+        $this->assertTrue(true);
+    }
+
+    public function test_does_not_throw_when_connection_fails()
+    {
+        Http::fake(function () {
+            throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+        });
+
+        $notifier = new DiscordNotifier(
+            webhookUrl: 'https://discord.com/api/webhooks/123/abc',
+            mention: null,
+        );
+
+        // não deve lançar exception mesmo com falha de conexão
+        $notifier->notifyFailure('teste', []);
+
+        $this->assertTrue(true);
+    }
 }

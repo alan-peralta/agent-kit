@@ -3,6 +3,7 @@
 namespace Peralta\AgentKit\ErrorRecovery\Notifiers;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Peralta\AgentKit\ErrorRecovery\Contracts\AlertNotifier;
 
 class DiscordNotifier implements AlertNotifier
@@ -46,6 +47,12 @@ class DiscordNotifier implements AlertNotifier
             return;
         }
 
-        Http::post($this->webhookUrl, ['content' => $content]);
+        try {
+            Http::timeout(5)->post($this->webhookUrl, ['content' => $content]);
+        } catch (\Throwable $e) {
+            Log::warning('[agent-kit] Falha ao enviar alerta pro Discord', [
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
