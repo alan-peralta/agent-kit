@@ -2,20 +2,18 @@
 
 namespace Peralta\AgentKit\Tests\Unit\Providers;
 
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
-use Peralta\AgentKit\Contracts\Tool;
-use Peralta\AgentKit\DTOs\Context;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\DTOs\ToolCall;
 use Peralta\AgentKit\Exceptions\ProviderException;
 use Peralta\AgentKit\Providers\AnthropicProvider;
+use Peralta\AgentKit\Tests\Unit\Providers\Concerns\MocksGuzzleHttp;
 use PHPUnit\Framework\TestCase;
 
 class AnthropicProviderTest extends TestCase
 {
+    use MocksGuzzleHttp;
+
     public function test_chat_sends_correct_url_headers_and_payload()
     {
         [$provider, $history] = $this->provider([
@@ -134,9 +132,7 @@ class AnthropicProviderTest extends TestCase
 
     private function provider(array $responses): array
     {
-        $history = new \ArrayObject();
-        $stack = HandlerStack::create(new MockHandler($responses));
-        $stack->push(Middleware::history($history));
+        [$stack, $history] = $this->mockHandlerStack($responses);
 
         $provider = new AnthropicProvider([
             'base_url' => 'http://api.test',
@@ -148,16 +144,5 @@ class AnthropicProviderTest extends TestCase
         ]);
 
         return [$provider, $history];
-    }
-
-    private function fakeTool(): Tool
-    {
-        return new class implements Tool {
-            public function name(): string { return 'search'; }
-            public function description(): string { return 'Busca coisas'; }
-            public function schema(): array { return ['type' => 'object']; }
-            public function authorize(Context $context): bool { return true; }
-            public function handle(array $input, Context $context): mixed { return []; }
-        };
     }
 }

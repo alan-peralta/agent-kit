@@ -2,16 +2,16 @@
 
 namespace Peralta\AgentKit\Tests\Unit\Providers;
 
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\Providers\DeepSeekProvider;
+use Peralta\AgentKit\Tests\Unit\Providers\Concerns\MocksGuzzleHttp;
 use PHPUnit\Framework\TestCase;
 
 class DeepSeekProviderTest extends TestCase
 {
+    use MocksGuzzleHttp;
+
     public function test_name_returns_deepseek()
     {
         $provider = new DeepSeekProvider([
@@ -25,14 +25,12 @@ class DeepSeekProviderTest extends TestCase
 
     public function test_chat_uses_openai_compatible_request_and_response_shape()
     {
-        $history = new \ArrayObject();
-        $stack = HandlerStack::create(new MockHandler([
+        [$stack, $history] = $this->mockHandlerStack([
             new Response(200, [], json_encode([
                 'choices' => [['message' => ['role' => 'assistant', 'content' => 'oi'], 'finish_reason' => 'stop']],
                 'usage' => ['prompt_tokens' => 4, 'completion_tokens' => 2],
             ])),
-        ]));
-        $stack->push(Middleware::history($history));
+        ]);
 
         $provider = new DeepSeekProvider([
             'base_url' => 'http://api.test',
