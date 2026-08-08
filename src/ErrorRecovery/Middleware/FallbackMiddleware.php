@@ -29,10 +29,13 @@ class FallbackMiddleware implements Middleware
             return $handler($context);
         } catch (Throwable $e) {
             $errorType = $this->classifier->classify($e);
+            $context->recordFailure($originalProvider, $errorType->value);
 
             if (!$this->isFallbackEligible($errorType->value)) {
                 throw $e;
             }
+
+            $lastException = $e;
 
             foreach ($this->remainingProviders($tried) as $provider) {
                 $tried[] = $provider;
@@ -43,6 +46,7 @@ class FallbackMiddleware implements Middleware
                 } catch (Throwable $inner) {
                     $innerType = $this->classifier->classify($inner);
                     $context->recordFailure($provider, $innerType->value);
+                    $lastException = $inner;
                     continue;
                 }
             }
@@ -50,6 +54,7 @@ class FallbackMiddleware implements Middleware
             throw new AllProvidersFailedException(
                 "Todos os providers falharam: " . implode(', ', $tried),
                 $context->summary(),
+                $lastException,
             );
         }
     }

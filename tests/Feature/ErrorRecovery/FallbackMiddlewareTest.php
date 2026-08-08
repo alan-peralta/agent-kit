@@ -59,6 +59,47 @@ class FallbackMiddlewareTest extends TestCase
         $middleware->handle($handler, new RecoveryContext(provider: 'openai'));
     }
 
+    public function test_all_providers_failed_exception_preserves_last_exception_as_previous()
+    {
+        $handler = function (RecoveryContext $ctx) {
+            throw $this->networkTimeoutException();
+        };
+
+        $middleware = new FallbackMiddleware(
+            new DefaultErrorClassifier(),
+            ['openai', 'anthropic'],
+            $this->config(),
+        );
+
+        try {
+            $middleware->handle($handler, new RecoveryContext(provider: 'openai'));
+            $this->fail('Expected AllProvidersFailedException to be thrown');
+        } catch (AllProvidersFailedException $e) {
+            $this->assertInstanceOf(ProviderException::class, $e->getPrevious());
+        }
+    }
+
+    public function test_summary_includes_original_provider_failure()
+    {
+        $handler = function (RecoveryContext $ctx) {
+            throw $this->networkTimeoutException();
+        };
+
+        $middleware = new FallbackMiddleware(
+            new DefaultErrorClassifier(),
+            ['openai', 'anthropic'],
+            $this->config(),
+        );
+
+        try {
+            $middleware->handle($handler, new RecoveryContext(provider: 'openai'));
+            $this->fail('Expected AllProvidersFailedException to be thrown');
+        } catch (AllProvidersFailedException $e) {
+            $this->assertArrayHasKey('openai', $e->providerSummary);
+            $this->assertEquals('NETWORK_TIMEOUT', $e->providerSummary['openai']['last_error']);
+        }
+    }
+
     public function test_skips_fallback_for_invalid_request_errors()
     {
         $calls = [];
