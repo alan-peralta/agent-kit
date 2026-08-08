@@ -103,6 +103,31 @@ class OpenAIProviderTest extends TestCase
         ]], $body['tools']);
     }
 
+    public function test_chat_serializes_tool_result_message_into_flat_tool_message()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['role' => 'assistant', 'content' => 'ok'], 'finish_reason' => 'stop']],
+            ])),
+        ]);
+
+        $messages = [
+            Message::user('busque algo'),
+            Message::assistant(null, [new \Peralta\AgentKit\DTOs\ToolCall('call-1', 'search', ['q' => 'php'])]),
+            Message::tool('call-1', 'resultado'),
+        ];
+
+        $provider->chat(messages: $messages);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+
+        $this->assertSame([
+            'role' => 'tool',
+            'tool_call_id' => 'call-1',
+            'content' => 'resultado',
+        ], $body['messages'][2]);
+    }
+
     public function test_throws_provider_exception_on_missing_choices()
     {
         [$provider] = $this->provider([
