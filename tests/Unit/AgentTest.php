@@ -156,6 +156,98 @@ class AgentTest extends TestCase
         $agent->provider('openai')->tools([$tool])->send('oi');
     }
 
+    public function test_fluent_builder_methods_affect_the_provider_call()
+    {
+        $provider = Mockery::mock(Provider::class);
+        $provider->shouldReceive('name')->andReturn('openai');
+        $provider->shouldReceive('chat')
+            ->once()
+            ->with(
+                Mockery::any(),
+                Mockery::any(),
+                'seja conciso',
+                Mockery::on(fn($opts) => $opts['model'] === 'gpt-4o-mini' && $opts['temperature'] === 0.2),
+            )
+            ->andReturn(new AgentResponse(message: Message::assistant('ok'), stopReason: 'stop'));
+
+        $this->app->bind('agent-kit.provider.openai', fn() => $provider);
+
+        $agent = $this->app->make(Agent::class);
+        $agent->provider('openai')
+            ->model('gpt-4o-mini')
+            ->system('seja conciso')
+            ->options(['temperature' => 0.2])
+            ->send('oi');
+    }
+
+    public function test_context_method_accepts_array_and_is_available_to_tools()
+    {
+        $provider = Mockery::mock(Provider::class);
+        $provider->shouldReceive('name')->andReturn('openai');
+        $provider->shouldReceive('chat')
+            ->once()
+            ->andReturn(new AgentResponse(
+                message: Message::assistant(null, [new ToolCall('call-1', 'ver_contexto', [])]),
+                stopReason: 'tool_use',
+            ));
+        $provider->shouldReceive('chat')
+            ->once()
+            ->andReturn(new AgentResponse(message: Message::assistant('ok'), stopReason: 'stop'));
+
+        $this->app->bind('agent-kit.provider.openai', fn() => $provider);
+
+        $receivedTenantId = null;
+        $tool = new class implements Tool {
+            public $onHandle;
+            public function name(): string { return 'ver_contexto'; }
+            public function description(): string { return 'x'; }
+            public function schema(): array { return []; }
+            public function authorize(Context $context): bool { return true; }
+            public function handle(array $input, Context $context): mixed {
+                ($this->onHandle)($context);
+                return [];
+            }
+        };
+        $tool->onHandle = function (Context $context) use (&$receivedTenantId) {
+            $receivedTenantId = $context->tenantId;
+        };
+
+        $agent = $this->app->make(Agent::class);
+        $agent->provider('openai')->tools([$tool])->context(['tenant_id' => 'tenant-123'])->send('oi');
+
+        $this->assertSame('tenant-123', $receivedTenantId);
+    }
+
+    public function test_knowledge_base_adds_knowledge_search_tool_to_resolved_tools()
+    {
+        config([
+            'agent-kit.knowledge.embedder' => 'openai',
+            'agent-kit.knowledge.embedders.openai' => ['driver' => 'openai', 'api_key' => 'x', 'model' => 'text-embedding-3-small', 'base_url' => 'https://api.openai.com/v1'],
+            'agent-kit.knowledge.store' => 'pgvector',
+            'agent-kit.knowledge.stores.pgvector' => ['driver' => 'pgvector', 'connection' => 'pgsql', 'table' => 'knowledge_chunks'],
+        ]);
+
+        $provider = Mockery::mock(Provider::class);
+        $provider->shouldReceive('name')->andReturn('openai');
+        $provider->shouldReceive('chat')
+            ->once()
+            ->with(
+                Mockery::any(),
+                Mockery::on(function ($tools) {
+                    return count($tools) === 1
+                        && $tools[0] instanceof \Peralta\AgentKit\Knowledge\Tools\KnowledgeSearchTool;
+                }),
+                Mockery::any(),
+                Mockery::any(),
+            )
+            ->andReturn(new AgentResponse(message: Message::assistant('ok'), stopReason: 'stop'));
+
+        $this->app->bind('agent-kit.provider.openai', fn() => $provider);
+
+        $agent = $this->app->make(Agent::class);
+        $agent->provider('openai')->knowledgeBase('faq', 'Perguntas frequentes')->send('oi');
+    }
+
     private function echoTool(): Tool
     {
         return new class implements Tool {
