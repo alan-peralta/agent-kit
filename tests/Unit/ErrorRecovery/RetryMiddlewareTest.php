@@ -97,4 +97,33 @@ class RetryMiddlewareTest extends TestCase
         $previous = new \GuzzleHttp\Exception\RequestException('bad request', $request, $response);
         return new ProviderException('Erro chamando openai: bad request', 0, $previous);
     }
+
+    public function test_dispatches_recovery_attempted_on_each_retry_and_recovery_exhausted_on_final_failure()
+    {
+        \Illuminate\Support\Facades\Event::fake();
+
+        $classifier = \Mockery::mock(\Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier::class);
+        $classifier->shouldReceive('classify')->andReturn(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR);
+
+        $strategy = \Mockery::mock(\Peralta\AgentKit\ErrorRecovery\Contracts\RetryStrategy::class);
+        $strategy->shouldReceive('shouldRetry')->once()->with(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR, 1)->andReturn(true);
+        $strategy->shouldReceive('delayMs')->once()->andReturn(0);
+        $strategy->shouldReceive('shouldRetry')->once()->with(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR, 2)->andReturn(false);
+
+        $middleware = new RetryMiddleware($strategy, $classifier);
+
+        $context = new RecoveryContext(provider: 'openai', conversationId: 'conv-1');
+
+        try {
+            $middleware->handle(function () {
+                throw new \RuntimeException('boom');
+            }, $context);
+            $this->fail('Expected exception was not thrown');
+        } catch (\RuntimeException) {
+            // esperado
+        }
+
+        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryAttempted::class, fn($e) => $e->strategy === 'retry' && $e->attemptNumber === 1);
+        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryExhausted::class, fn($e) => $e->attempts === 2);
+    }
 }
