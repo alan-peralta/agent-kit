@@ -2,9 +2,12 @@
 
 namespace Peralta\AgentKit\ErrorRecovery\Middleware;
 
+use Illuminate\Support\Facades\Event;
 use Peralta\AgentKit\DTOs\RecoveryContext;
 use Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Contracts\Middleware;
+use Peralta\AgentKit\Events\RecoveryAttempted;
+use Peralta\AgentKit\Events\RecoveryExhausted;
 use Peralta\AgentKit\Exceptions\AllProvidersFailedException;
 use Throwable;
 
@@ -24,6 +27,7 @@ class FallbackMiddleware implements Middleware
     {
         $originalProvider = $context->provider;
         $tried = [$originalProvider];
+        $attempt = 1;
 
         try {
             return $handler($context);
@@ -36,10 +40,20 @@ class FallbackMiddleware implements Middleware
             }
 
             $lastException = $e;
+            $lastErrorType = $errorType->value;
 
             foreach ($this->remainingProviders($tried) as $provider) {
                 $tried[] = $provider;
+                $attempt++;
                 $context->switchProvider($provider);
+
+                Event::dispatch(new RecoveryAttempted(
+                    conversationId: $context->conversationId,
+                    provider: $provider,
+                    attemptNumber: $attempt,
+                    strategy: 'fallback',
+                    errorClass: $lastErrorType,
+                ));
 
                 try {
                     return $handler($context);
@@ -47,9 +61,16 @@ class FallbackMiddleware implements Middleware
                     $innerType = $this->classifier->classify($inner);
                     $context->recordFailure($provider, $innerType->value);
                     $lastException = $inner;
+                    $lastErrorType = $innerType->value;
                     continue;
                 }
             }
+
+            Event::dispatch(new RecoveryExhausted(
+                conversationId: $context->conversationId,
+                attempts: $attempt,
+                finalErrorClass: $lastErrorType,
+            ));
 
             throw new AllProvidersFailedException(
                 "Todos os providers falharam: " . implode(', ', $tried),

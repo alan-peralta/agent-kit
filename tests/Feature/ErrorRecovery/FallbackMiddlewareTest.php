@@ -137,4 +137,32 @@ class FallbackMiddlewareTest extends TestCase
         $previous = new \GuzzleHttp\Exception\RequestException('bad request', $request, $response);
         return new ProviderException('Erro chamando openai: bad request', 0, $previous);
     }
+
+    public function test_dispatches_recovery_attempted_on_switch_and_recovery_exhausted_when_all_fail()
+    {
+        \Illuminate\Support\Facades\Event::fake();
+
+        $classifier = \Mockery::mock(\Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier::class);
+        $classifier->shouldReceive('classify')->andReturn(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR);
+
+        $middleware = new FallbackMiddleware(
+            $classifier,
+            ['openai', 'anthropic'],
+            ['on_errors' => ['SERVER_ERROR'], 'skip_on_errors' => []],
+        );
+
+        $context = new RecoveryContext(provider: 'openai', conversationId: 'conv-1');
+
+        try {
+            $middleware->handle(function () {
+                throw new \RuntimeException('boom');
+            }, $context);
+            $this->fail('Expected exception was not thrown');
+        } catch (AllProvidersFailedException) {
+            // esperado
+        }
+
+        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryAttempted::class, fn($e) => $e->strategy === 'fallback' && $e->provider === 'anthropic');
+        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryExhausted::class);
+    }
 }

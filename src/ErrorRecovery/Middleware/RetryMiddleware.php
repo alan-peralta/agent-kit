@@ -2,10 +2,13 @@
 
 namespace Peralta\AgentKit\ErrorRecovery\Middleware;
 
+use Illuminate\Support\Facades\Event;
 use Peralta\AgentKit\DTOs\RecoveryContext;
 use Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Contracts\Middleware;
 use Peralta\AgentKit\ErrorRecovery\Contracts\RetryStrategy;
+use Peralta\AgentKit\Events\RecoveryAttempted;
+use Peralta\AgentKit\Events\RecoveryExhausted;
 use Throwable;
 
 class RetryMiddleware implements Middleware
@@ -28,7 +31,21 @@ class RetryMiddleware implements Middleware
                 $errorType = $this->classifier->classify($e);
                 $context->recordFailure($context->provider, $errorType->value);
 
+                Event::dispatch(new RecoveryAttempted(
+                    conversationId: $context->conversationId,
+                    provider: $context->provider,
+                    attemptNumber: $attempt,
+                    strategy: 'retry',
+                    errorClass: $errorType->value,
+                ));
+
                 if (!$this->strategy->shouldRetry($errorType, $attempt)) {
+                    Event::dispatch(new RecoveryExhausted(
+                        conversationId: $context->conversationId,
+                        attempts: $attempt,
+                        finalErrorClass: $errorType->value,
+                    ));
+
                     throw $e;
                 }
 
