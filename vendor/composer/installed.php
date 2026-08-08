@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'peralta/agent-kit',
-        'pretty_version' => '1.0.0+no-version-set',
-        'version' => '1.0.0.0',
-        'reference' => null,
+        'pretty_version' => 'dev-main',
+        'version' => 'dev-main',
+        'reference' => '535d641da32ea0588cc136a76f1260c33e72701c',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -647,9 +647,9 @@
             'dev_requirement' => true,
         ),
         'peralta/agent-kit' => array(
-            'pretty_version' => '1.0.0+no-version-set',
-            'version' => '1.0.0.0',
-            'reference' => null,
+            'pretty_version' => 'dev-main',
+            'version' => 'dev-main',
+            'reference' => '535d641da32ea0588cc136a76f1260c33e72701c',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
