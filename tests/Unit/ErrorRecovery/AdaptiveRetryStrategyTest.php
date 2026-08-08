@@ -76,4 +76,17 @@ class AdaptiveRetryStrategyTest extends TestCase
         $this->assertGreaterThanOrEqual(1000, $delay);
         $this->assertLessThanOrEqual(2000, $delay);
     }
+
+    public function test_delay_with_jitter_never_exceeds_max_delay_ms()
+    {
+        $policies = $this->policies();
+        $policies['NETWORK_TIMEOUT']['jitter'] = true;
+        $strategy = new AdaptiveRetryStrategy($policies);
+
+        // attempt 10 with multiplier 2.0 would be way past max_delay_ms even before jitter
+        for ($i = 0; $i < 20; $i++) {
+            $delay = $strategy->delayMs(ErrorType::NETWORK_TIMEOUT, 10);
+            $this->assertLessThanOrEqual(30000, $delay);
+        }
+    }
 }
