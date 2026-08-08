@@ -199,3 +199,28 @@ Default: `AGENT_PROVIDER=...` no `.env`.
 
 Toda a lógica de tools e RAG é agnóstica. O loop adapta automaticamente
 o formato de mensagens e tool calls pra cada provider.
+
+## Error Recovery
+
+O Agent Kit tenta recuperar automaticamente de falhas transitórias nos providers:
+
+1. **Retry** com backoff exponencial + jitter (configurável por tipo de erro)
+2. **Fallback** para outro provider configurado se o atual esgotar as tentativas
+3. **Alerta no Discord** quando um fallback é ativado ou quando todos os providers falham
+
+Configure em `.env`:
+
+```env
+AGENT_ERROR_RECOVERY_ENABLED=true
+AGENT_DISCORD_ALERTS_ENABLED=true
+AGENT_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/SEU_ID/SEU_TOKEN
+AGENT_DISCORD_MENTION=@oncall
+```
+
+Políticas de retry por tipo de erro (timeouts, rate limit, erros de servidor, auth,
+requisições inválidas) ficam em `config/agent-kit.php` → `error_recovery`. Erros de
+`INVALID_REQUEST` (400) nunca são retentados nem geram fallback, pois indicam erro
+da própria aplicação.
+
+Todo o processo é transparente: o usuário final recebe a resposta normalmente,
+sem saber que houve retry ou troca de provider.
