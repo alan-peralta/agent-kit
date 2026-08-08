@@ -9,7 +9,8 @@ class AgentMetricTest extends TestCase
 {
     protected function defineDatabaseMigrations()
     {
-        $this->loadMigrationsFrom(__DIR__ . '/../../../database/migrations');
+        $migration = require __DIR__ . '/../../../database/migrations/2026_08_08_000003_create_agent_kit_metrics_table.php';
+        $migration->up();
     }
 
     public function test_can_create_and_read_a_metric_row()
