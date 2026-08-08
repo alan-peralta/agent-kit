@@ -70,6 +70,6 @@ class PersistMetricsListenerTest extends TestCase
             success: true,
         ));
 
-        $this->assertTrue(true); // should not throw
+        $this->assertDatabaseCount('agent_kit_metrics', 0);
     }
 }
