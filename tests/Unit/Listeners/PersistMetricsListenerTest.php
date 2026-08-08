@@ -18,6 +18,8 @@ class PersistMetricsListenerTest extends TestCase
 
     public function test_persists_agent_request_completed_with_common_columns()
     {
+        config(['agent-kit.analytics.persist' => true]);
+
         (new PersistMetricsListener())->handle(new AgentRequestCompleted(
             conversationId: 'conv-1',
             provider: 'openai',
@@ -40,6 +42,8 @@ class PersistMetricsListenerTest extends TestCase
 
     public function test_persists_tool_call_executed_without_provider_or_duration()
     {
+        config(['agent-kit.analytics.persist' => true]);
+
         (new PersistMetricsListener())->handle(new ToolCallExecuted(
             conversationId: 'conv-1',
             toolName: 'search',
@@ -58,7 +62,7 @@ class PersistMetricsListenerTest extends TestCase
 
     public function test_swallows_exceptions_instead_of_throwing()
     {
-        config(['agent-kit.analytics.table' => 'a_table_that_does_not_exist']);
+        config(['agent-kit.analytics.persist' => true, 'agent-kit.analytics.table' => 'a_table_that_does_not_exist']);
 
         (new PersistMetricsListener())->handle(new ToolCallExecuted(
             conversationId: 'conv-1',

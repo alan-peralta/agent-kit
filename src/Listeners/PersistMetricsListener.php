@@ -17,6 +17,8 @@ class PersistMetricsListener
 {
     public function handle(AgentKitEvent $event): void
     {
+        if (!config('agent-kit.analytics.persist', false)) return;
+
         try {
             AgentMetric::create($this->mapEvent($event));
         } catch (\Throwable $e) {
