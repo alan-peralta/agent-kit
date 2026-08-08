@@ -269,4 +269,18 @@ return [
         'log_tool_calls' => true,
         'log_messages' => false, // cuidado com PII
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Analytics & Monitoring
+    |--------------------------------------------------------------------------
+    | Eventos de observabilidade (uso de tokens, tool calls, latência, retries).
+    | 'enabled' controla o dispatch dos eventos. 'persist' controla se o listener
+    | interno grava cada evento na tabela 'agent_kit_metrics'.
+    */
+    'analytics' => [
+        'enabled' => env('AGENT_KIT_ANALYTICS_ENABLED', true),
+        'persist' => env('AGENT_KIT_ANALYTICS_PERSIST', false),
+        'table' => 'agent_kit_metrics',
+    ],
 ];
