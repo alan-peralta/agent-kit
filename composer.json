@@ -1,0 +1,52 @@
+{
+    "name": "peralta/agent-kit",
+    "description": "AI agents toolkit for Laravel with multi-provider support, tools and RAG.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "ai", "agents", "openai", "anthropic", "gemini", "deepseek", "rag", "pgvector"],
+    "authors": [
+        {
+            "name": "Peralta"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/contracts": "^10.0|^11.0|^12.0",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/database": "^10.0|^11.0|^12.0",
+        "illuminate/http": "^10.0|^11.0|^12.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "phpunit/phpunit": "^10.0|^11.0",
+        "pgvector/pgvector": "^0.2"
+    },
+    "suggest": {
+        "pgvector/pgvector": "Required for pgvector knowledge store",
+        "smalot/pdfparser": "For extracting text from PDF documents",
+        "phpoffice/phpword": "For extracting text from DOCX documents"
+    },
+    "autoload": {
+        "psr-4": {
+            "Peralta\\AgentKit\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Peralta\\AgentKit\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Peralta\\AgentKit\\AgentKitServiceProvider"
+            ],
+            "aliases": {
+                "Agent": "Peralta\\AgentKit\\Facades\\Agent"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
