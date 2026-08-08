@@ -224,3 +224,33 @@ da própria aplicação.
 
 Todo o processo é transparente: o usuário final recebe a resposta normalmente,
 sem saber que houve retry ou troca de provider.
+
+## Analytics & Monitoring
+
+O Agent Kit dispara eventos durante o ciclo de vida de cada requisição, permitindo
+observabilidade sem acoplar o core a nenhuma ferramenta específica de métricas.
+
+Configure em `config/agent-kit.php` → `analytics`:
+
+```php
+'analytics' => [
+    'enabled' => env('AGENT_KIT_ANALYTICS_ENABLED', true),
+    'persist' => env('AGENT_KIT_ANALYTICS_PERSIST', false),
+    'table' => 'agent_kit_metrics',
+],
+```
+
+- `analytics.enabled` — liga/desliga o disparo dos eventos de analytics.
+- `analytics.persist` — quando `true`, persiste as métricas na tabela configurada
+  (via listener dedicado), além de logar.
+- `analytics.table` — nome da tabela usada para persistir as métricas.
+
+Eventos disparados:
+
+- `AgentRequestStarted` — disparado no início de `Agent::send()`
+- `AgentRequestCompleted` — disparado quando a resposta não tem mais tool calls
+- `ProviderCallCompleted` — disparado após cada chamada ao provider dentro do loop de `send()`
+- `TokenUsageRecorded` — disparado com as contagens de tokens de entrada/saída
+- `ToolCallExecuted` — disparado após cada execução de tool
+- `RecoveryAttempted` — disparado a cada tentativa de retry/fallback
+- `RecoveryExhausted` — disparado quando todas as tentativas de recuperação se esgotam
