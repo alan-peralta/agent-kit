@@ -2,6 +2,7 @@
 
 namespace Peralta\AgentKit;
 
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Peralta\AgentKit\ErrorRecovery\Classifiers\DefaultErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Contracts\AlertNotifier;
@@ -12,6 +13,12 @@ use Peralta\AgentKit\ErrorRecovery\Notifiers\DiscordNotifier;
 use Peralta\AgentKit\ErrorRecovery\Notifiers\NullNotifier;
 use Peralta\AgentKit\ErrorRecovery\Pipeline;
 use Peralta\AgentKit\ErrorRecovery\Strategies\AdaptiveRetryStrategy;
+use Peralta\AgentKit\Events\AgentKitEvent;
+use Peralta\AgentKit\Events\TokenUsageRecorded;
+use Peralta\AgentKit\Events\ToolCallExecuted;
+use Peralta\AgentKit\Listeners\LogToolCallListener;
+use Peralta\AgentKit\Listeners\LogUsageListener;
+use Peralta\AgentKit\Listeners\PersistMetricsListener;
 use Peralta\AgentKit\Conversation\ConversationManager;
 use Peralta\AgentKit\Conversation\Contracts\ConversationStore;
 use Peralta\AgentKit\Conversation\Drivers\ArrayStore;
@@ -44,6 +51,7 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->registerKnowledge();
         $this->registerErrorRecovery();
         $this->registerAgent();
+        $this->registerAnalytics();
     }
 
     public function boot(): void
@@ -207,5 +215,12 @@ class AgentKitServiceProvider extends ServiceProvider
                 pipeline: $app->make(Pipeline::class),
             );
         });
+    }
+
+    protected function registerAnalytics(): void
+    {
+        Event::listen(TokenUsageRecorded::class, LogUsageListener::class);
+        Event::listen(ToolCallExecuted::class, LogToolCallListener::class);
+        Event::listen(AgentKitEvent::class, PersistMetricsListener::class);
     }
 }
