@@ -100,6 +100,35 @@ class AnthropicProviderTest extends TestCase
         ]], $body['tools']);
     }
 
+    public function test_chat_serializes_tool_result_message_into_tool_result_content_block()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'content' => [['type' => 'text', 'text' => 'ok']],
+                'stop_reason' => 'end_turn',
+            ])),
+        ]);
+
+        $messages = [
+            Message::user('busque algo'),
+            Message::assistant(null, [new ToolCall('call-1', 'search', ['q' => 'php'])]),
+            Message::tool('call-1', 'resultado da busca'),
+        ];
+
+        $provider->chat(messages: $messages);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+
+        $this->assertSame([
+            'role' => 'user',
+            'content' => [[
+                'type' => 'tool_result',
+                'tool_use_id' => 'call-1',
+                'content' => 'resultado da busca',
+            ]],
+        ], $body['messages'][2]);
+    }
+
     public function test_throws_provider_exception_on_missing_content_key()
     {
         [$provider] = $this->provider([

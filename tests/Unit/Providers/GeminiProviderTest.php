@@ -109,6 +109,57 @@ class GeminiProviderTest extends TestCase
         $this->assertSame('string', $params['properties']['q']['type']);
     }
 
+    public function test_chat_serializes_tool_result_message_as_function_response_with_default_name()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'candidates' => [['content' => ['parts' => [['text' => 'ok']]], 'finishReason' => 'STOP']],
+            ])),
+        ]);
+
+        $messages = [
+            Message::user('busque algo'),
+            Message::tool('call-1', 'resultado da busca'),
+        ];
+
+        $provider->chat(messages: $messages);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+
+        $this->assertSame([
+            'role' => 'user',
+            'parts' => [[
+                'functionResponse' => [
+                    'name' => 'tool',
+                    'response' => ['content' => 'resultado da busca'],
+                ],
+            ]],
+        ], $body['contents'][1]);
+    }
+
+    public function test_chat_serializes_tool_result_message_uses_function_name_from_metadata()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'candidates' => [['content' => ['parts' => [['text' => 'ok']]], 'finishReason' => 'STOP']],
+            ])),
+        ]);
+
+        $toolResultMessage = new Message(
+            role: 'tool',
+            content: 'resultado da busca',
+            toolCallId: 'call-1',
+            metadata: ['function_name' => 'search'],
+        );
+
+        $provider->chat(messages: [Message::user('busque algo'), $toolResultMessage]);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+
+        $this->assertSame('search', $body['contents'][1]['parts'][0]['functionResponse']['name']);
+        $this->assertSame('resultado da busca', $body['contents'][1]['parts'][0]['functionResponse']['response']['content']);
+    }
+
     public function test_throws_provider_exception_on_missing_candidates()
     {
         [$provider] = $this->provider([
