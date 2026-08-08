@@ -126,4 +126,35 @@ class RetryMiddlewareTest extends TestCase
         \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryAttempted::class, fn($e) => $e->strategy === 'retry' && $e->attemptNumber === 1);
         \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryExhausted::class, fn($e) => $e->attempts === 2);
     }
+
+    public function test_does_not_dispatch_recovery_events_when_analytics_disabled()
+    {
+        \Illuminate\Support\Facades\Event::fake();
+
+        config(['agent-kit.analytics.enabled' => false]);
+
+        $classifier = \Mockery::mock(\Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier::class);
+        $classifier->shouldReceive('classify')->andReturn(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR);
+
+        $strategy = \Mockery::mock(\Peralta\AgentKit\ErrorRecovery\Contracts\RetryStrategy::class);
+        $strategy->shouldReceive('shouldRetry')->once()->with(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR, 1)->andReturn(true);
+        $strategy->shouldReceive('delayMs')->once()->andReturn(0);
+        $strategy->shouldReceive('shouldRetry')->once()->with(\Peralta\AgentKit\ErrorRecovery\Enums\ErrorType::SERVER_ERROR, 2)->andReturn(false);
+
+        $middleware = new RetryMiddleware($strategy, $classifier);
+
+        $context = new RecoveryContext(provider: 'openai', conversationId: 'conv-1');
+
+        try {
+            $middleware->handle(function () {
+                throw new \RuntimeException('boom');
+            }, $context);
+            $this->fail('Expected exception was not thrown');
+        } catch (\RuntimeException) {
+            // esperado
+        }
+
+        \Illuminate\Support\Facades\Event::assertNotDispatched(\Peralta\AgentKit\Events\RecoveryAttempted::class);
+        \Illuminate\Support\Facades\Event::assertNotDispatched(\Peralta\AgentKit\Events\RecoveryExhausted::class);
+    }
 }

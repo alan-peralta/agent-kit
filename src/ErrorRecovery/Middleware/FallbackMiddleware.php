@@ -2,13 +2,13 @@
 
 namespace Peralta\AgentKit\ErrorRecovery\Middleware;
 
-use Illuminate\Support\Facades\Event;
 use Peralta\AgentKit\DTOs\RecoveryContext;
 use Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Contracts\Middleware;
 use Peralta\AgentKit\Events\RecoveryAttempted;
 use Peralta\AgentKit\Events\RecoveryExhausted;
 use Peralta\AgentKit\Exceptions\AllProvidersFailedException;
+use Peralta\AgentKit\Support\SafeEventDispatcher;
 use Throwable;
 
 class FallbackMiddleware implements Middleware
@@ -47,7 +47,7 @@ class FallbackMiddleware implements Middleware
                 $attempt++;
                 $context->switchProvider($provider);
 
-                Event::dispatch(new RecoveryAttempted(
+                SafeEventDispatcher::dispatch(new RecoveryAttempted(
                     conversationId: $context->conversationId,
                     provider: $provider,
                     attemptNumber: $attempt,
@@ -66,7 +66,7 @@ class FallbackMiddleware implements Middleware
                 }
             }
 
-            Event::dispatch(new RecoveryExhausted(
+            SafeEventDispatcher::dispatch(new RecoveryExhausted(
                 conversationId: $context->conversationId,
                 attempts: $attempt,
                 finalErrorClass: $lastErrorType,

@@ -3,7 +3,6 @@
 namespace Peralta\AgentKit;
 
 use Illuminate\Contracts\Container\Container;
-use Illuminate\Support\Facades\Event;
 use Peralta\AgentKit\Contracts\Provider;
 use Peralta\AgentKit\Contracts\Tool;
 use Peralta\AgentKit\Conversation\ConversationManager;
@@ -24,6 +23,7 @@ use Peralta\AgentKit\Exceptions\ToolException;
 use Peralta\AgentKit\Knowledge\Contracts\Embedder;
 use Peralta\AgentKit\Knowledge\Contracts\KnowledgeStore;
 use Peralta\AgentKit\Knowledge\Tools\KnowledgeSearchTool;
+use Peralta\AgentKit\Support\SafeEventDispatcher;
 
 class Agent
 {
@@ -216,9 +216,7 @@ class Agent
 
     protected function dispatchEvent(AgentKitEvent $event): void
     {
-        if (!($this->config['analytics']['enabled'] ?? true)) return;
-
-        Event::dispatch($event);
+        SafeEventDispatcher::dispatch($event);
     }
 
     protected function executeTool(?Tool $tool, $call, Context $context): mixed
