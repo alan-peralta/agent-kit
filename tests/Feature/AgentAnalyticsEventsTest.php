@@ -37,4 +37,29 @@ class AgentAnalyticsEventsTest extends TestCase
         Event::assertDispatched(ProviderCallCompleted::class, fn($e) => $e->iterationNumber === 1);
         Event::assertDispatched(AgentRequestCompleted::class, fn($e) => $e->iterations === 1);
     }
+
+    public function test_send_does_not_dispatch_events_when_analytics_disabled()
+    {
+        Event::fake();
+
+        config(['agent-kit.analytics.enabled' => false]);
+
+        $provider = \Mockery::mock(Provider::class);
+        $provider->shouldReceive('name')->andReturn('openai');
+        $provider->shouldReceive('chat')->once()->andReturn(new AgentResponse(
+            message: Message::assistant('oi'),
+            stopReason: 'stop',
+            inputTokens: 10,
+            outputTokens: 5,
+        ));
+
+        $this->app->bind('agent-kit.provider.openai', fn() => $provider);
+
+        $agent = $this->app->make(Agent::class);
+        $agent->provider('openai')->send('olá');
+
+        Event::assertNotDispatched(AgentRequestStarted::class);
+        Event::assertNotDispatched(ProviderCallCompleted::class);
+        Event::assertNotDispatched(AgentRequestCompleted::class);
+    }
 }
