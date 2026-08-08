@@ -298,11 +298,13 @@ class QdrantStore implements KnowledgeStore
      */
     protected function request(string $method, string $path, array $json = []): array
     {
+        // Guzzle só remove um header herdado quando o valor é um array vazio;
+        // um valor null é convertido em string vazia e o header permanece presente.
         $headers = [
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
-            'Authorization' => null,
-            'api-key' => null,
+            'Authorization' => [],
+            'api-key' => [],
         ];
 
         if ($this->apiKey !== null && $this->apiKey !== '') {

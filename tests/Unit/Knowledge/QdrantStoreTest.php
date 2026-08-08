@@ -330,7 +330,7 @@ class QdrantStoreTest extends TestCase
             $delays[] = $microseconds;
         }))->insert($this->chunk([1, 2, 3]));
 
-        self::assertSame(['GET', 'PUT', 'GET', 'GET', 'PUT'], array_map(fn ($entry) => $entry['request']->getMethod(), $history));
+        self::assertSame(['GET', 'PUT', 'GET', 'GET', 'PUT'], array_map(fn ($entry) => $entry['request']->getMethod(), (array) $history));
         self::assertSame([50_000], $delays);
     }
 
@@ -397,7 +397,7 @@ class QdrantStoreTest extends TestCase
         $store = new QdrantStore('http://qdrant.test', client: $client, sleeper: static fn () => null);
         $store->insert($this->chunk([1, 2, 3]));
         $store->insert($this->chunk([4, 5, 6]));
-        self::assertSame(['GET', 'PUT', 'PUT'], array_map(fn ($entry) => $entry['request']->getMethod(), $history));
+        self::assertSame(['GET', 'PUT', 'PUT'], array_map(fn ($entry) => $entry['request']->getMethod(), (array) $history));
     }
 
     public function test_insert_batch_partitions_points_and_preserves_ids_and_metadata(): void
@@ -571,7 +571,7 @@ class QdrantStoreTest extends TestCase
         $validPayload = ['tenant_id' => 'tenant', 'collection' => 'docs', 'source' => 'source', 'content' => 'content'];
 
         return [
-            'missing result' => [[]],
+            'missing result' => ['{}'],
             'empty result object' => ['{"result":{}}'],
             'empty points object' => ['{"result":{"points":{}}}'],
             'associative result envelope without points' => [['result' => ['status' => 'ok']]],
@@ -670,7 +670,7 @@ class QdrantStoreTest extends TestCase
             self::assertCount(3, $history);
             self::assertSame(['GET', 'PUT', 'PUT'], array_map(
                 fn ($entry) => $entry['request']->getMethod(),
-                $history,
+                (array) $history,
             ));
             self::assertCount(2, json_decode(
                 (string) $history[1]['request']->getBody(),
