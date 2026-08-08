@@ -192,6 +192,74 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Error Recovery
+    |--------------------------------------------------------------------------
+    | Retry automático, fallback entre providers e alertas via Discord.
+    */
+    'error_recovery' => [
+        'enabled' => env('AGENT_ERROR_RECOVERY_ENABLED', true),
+
+        'retry' => [
+            'enabled' => true,
+
+            'policies' => [
+                'NETWORK_TIMEOUT' => [
+                    'max_attempts' => 7,
+                    'initial_delay_ms' => 1000,
+                    'max_delay_ms' => 30000,
+                    'multiplier' => 2.0,
+                    'jitter' => true,
+                ],
+                'RATE_LIMIT' => [
+                    'max_attempts' => 5,
+                    'initial_delay_ms' => 2000,
+                    'max_delay_ms' => 60000,
+                    'multiplier' => 3.0,
+                    'jitter' => true,
+                ],
+                'SERVER_ERROR' => [
+                    'max_attempts' => 5,
+                    'initial_delay_ms' => 1000,
+                    'max_delay_ms' => 20000,
+                    'multiplier' => 2.0,
+                    'jitter' => true,
+                ],
+                'AUTH_ERROR' => [
+                    'max_attempts' => 0,
+                ],
+                'INVALID_REQUEST' => [
+                    'max_attempts' => 0,
+                ],
+            ],
+        ],
+
+        'fallback' => [
+            'enabled' => true,
+
+            'on_errors' => [
+                'NETWORK_TIMEOUT',
+                'RATE_LIMIT',
+                'SERVER_ERROR',
+                'AUTH_ERROR',
+            ],
+
+            'skip_on_errors' => [
+                'INVALID_REQUEST',
+            ],
+        ],
+
+        'alerts' => [
+            'enabled' => env('AGENT_DISCORD_ALERTS_ENABLED', false),
+
+            'discord' => [
+                'webhook_url' => env('AGENT_DISCORD_WEBHOOK_URL'),
+                'mention_on_critical' => env('AGENT_DISCORD_MENTION'),
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Logging
     |--------------------------------------------------------------------------
     */
