@@ -62,4 +62,25 @@ class AgentAnalyticsEventsTest extends TestCase
         Event::assertNotDispatched(ProviderCallCompleted::class);
         Event::assertNotDispatched(AgentRequestCompleted::class);
     }
+
+    public function test_send_dispatches_token_usage_recorded()
+    {
+        Event::fake();
+
+        $provider = \Mockery::mock(Provider::class);
+        $provider->shouldReceive('name')->andReturn('openai');
+        $provider->shouldReceive('chat')->once()->andReturn(new AgentResponse(
+            message: Message::assistant('oi'),
+            stopReason: 'stop',
+            inputTokens: 10,
+            outputTokens: 5,
+        ));
+
+        $this->app->bind('agent-kit.provider.openai', fn() => $provider);
+
+        $agent = $this->app->make(Agent::class);
+        $agent->provider('openai')->send('olá');
+
+        Event::assertDispatched(\Peralta\AgentKit\Events\TokenUsageRecorded::class, fn($e) => $e->inputTokens === 10 && $e->outputTokens === 5);
+    }
 }

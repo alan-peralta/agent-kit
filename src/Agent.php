@@ -4,7 +4,6 @@ namespace Peralta\AgentKit;
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Log;
 use Peralta\AgentKit\Contracts\Provider;
 use Peralta\AgentKit\Contracts\Tool;
 use Peralta\AgentKit\Conversation\ConversationManager;
@@ -17,6 +16,8 @@ use Peralta\AgentKit\Events\AgentKitEvent;
 use Peralta\AgentKit\Events\AgentRequestCompleted;
 use Peralta\AgentKit\Events\AgentRequestStarted;
 use Peralta\AgentKit\Events\ProviderCallCompleted;
+use Peralta\AgentKit\Events\TokenUsageRecorded;
+use Peralta\AgentKit\Events\ToolCallExecuted;
 use Peralta\AgentKit\Exceptions\AgentException;
 use Peralta\AgentKit\Exceptions\MaxIterationsExceededException;
 use Peralta\AgentKit\Exceptions\ToolException;
@@ -305,32 +306,21 @@ class Agent
 
     protected function logUsage(Provider $provider, AgentResponse $response): void
     {
-        if (!($this->config['logging']['enabled'] ?? false)) return;
-
-        Log::channel($this->config['logging']['channel'] ?? 'stack')->info(
-            '[agent-kit] Resposta finalizada',
-            [
-                'provider' => $provider->name(),
-                'input_tokens' => $response->inputTokens,
-                'output_tokens' => $response->outputTokens,
-                'conversation_id' => $this->conversationId,
-            ],
-        );
+        $this->dispatchEvent(new TokenUsageRecorded(
+            conversationId: $this->conversationId,
+            provider: $provider->name(),
+            model: $this->model,
+            inputTokens: $response->inputTokens,
+            outputTokens: $response->outputTokens,
+        ));
     }
 
     protected function logToolCall(string $name, array $input, mixed $result, bool $success): void
     {
-        if (!($this->config['logging']['enabled'] ?? false)) return;
-        if (!($this->config['logging']['log_tool_calls'] ?? false)) return;
-
-        Log::channel($this->config['logging']['channel'] ?? 'stack')->info(
-            '[agent-kit] Tool executada',
-            [
-                'tool' => $name,
-                'success' => $success,
-                'input' => $input,
-                'conversation_id' => $this->conversationId,
-            ],
-        );
+        $this->dispatchEvent(new ToolCallExecuted(
+            conversationId: $this->conversationId,
+            toolName: $name,
+            success: $success,
+        ));
     }
 }
