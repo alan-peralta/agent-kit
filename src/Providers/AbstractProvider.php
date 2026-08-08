@@ -14,10 +14,16 @@ abstract class AbstractProvider implements Provider
 
     public function __construct(protected array $config)
     {
-        $this->http = new Client([
+        $options = [
             'base_uri' => rtrim($config['base_url'], '/') . '/',
             'timeout' => $config['timeout'] ?? 60,
-        ]);
+        ];
+
+        if (isset($config['handler'])) {
+            $options['handler'] = $config['handler'];
+        }
+
+        $this->http = new Client($options);
     }
 
     protected function request(string $method, string $path, array $options = []): array

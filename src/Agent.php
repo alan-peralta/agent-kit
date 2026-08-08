@@ -10,6 +10,8 @@ use Peralta\AgentKit\Conversation\ConversationManager;
 use Peralta\AgentKit\DTOs\AgentResponse;
 use Peralta\AgentKit\DTOs\Context;
 use Peralta\AgentKit\DTOs\Message;
+use Peralta\AgentKit\DTOs\RecoveryContext;
+use Peralta\AgentKit\ErrorRecovery\Pipeline;
 use Peralta\AgentKit\Exceptions\AgentException;
 use Peralta\AgentKit\Exceptions\MaxIterationsExceededException;
 use Peralta\AgentKit\Exceptions\ToolException;
@@ -32,6 +34,7 @@ class Agent
     public function __construct(
         protected Container $container,
         protected array $config,
+        protected Pipeline $pipeline,
     ) {
         $this->maxIterations = $config['safety']['max_iterations'] ?? 10;
     }
@@ -127,12 +130,24 @@ class Agent
                 );
             }
 
-            $response = $provider->chat(
-                messages: $messages,
-                tools: $tools,
-                system: $this->systemPrompt,
-                options: $this->resolveOptions(),
+            $providerName = $this->providerName ?? $this->config['default'];
+            $recoveryContext = new RecoveryContext(provider: $providerName);
+
+            $response = $this->pipeline->execute(
+                function (RecoveryContext $ctx) use ($messages, $tools) {
+                    $provider = $this->container->make("agent-kit.provider.{$ctx->provider}");
+
+                    return $provider->chat(
+                        messages: $messages,
+                        tools: $tools,
+                        system: $this->systemPrompt,
+                        options: $this->resolveOptions(),
+                    );
+                },
+                $recoveryContext,
             );
+
+            $provider = $this->container->make("agent-kit.provider.{$recoveryContext->provider}");
 
             $messages[] = $response->message;
             if ($convo && $this->conversationId) {

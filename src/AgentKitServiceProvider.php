@@ -3,6 +3,15 @@
 namespace Peralta\AgentKit;
 
 use Illuminate\Support\ServiceProvider;
+use Peralta\AgentKit\ErrorRecovery\Classifiers\DefaultErrorClassifier;
+use Peralta\AgentKit\ErrorRecovery\Contracts\AlertNotifier;
+use Peralta\AgentKit\ErrorRecovery\Middleware\DiscordAlertMiddleware;
+use Peralta\AgentKit\ErrorRecovery\Middleware\FallbackMiddleware;
+use Peralta\AgentKit\ErrorRecovery\Middleware\RetryMiddleware;
+use Peralta\AgentKit\ErrorRecovery\Notifiers\DiscordNotifier;
+use Peralta\AgentKit\ErrorRecovery\Notifiers\NullNotifier;
+use Peralta\AgentKit\ErrorRecovery\Pipeline;
+use Peralta\AgentKit\ErrorRecovery\Strategies\AdaptiveRetryStrategy;
 use Peralta\AgentKit\Conversation\ConversationManager;
 use Peralta\AgentKit\Conversation\Contracts\ConversationStore;
 use Peralta\AgentKit\Conversation\Drivers\ArrayStore;
@@ -33,6 +42,7 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->registerProviders();
         $this->registerConversation();
         $this->registerKnowledge();
+        $this->registerErrorRecovery();
         $this->registerAgent();
     }
 
@@ -155,12 +165,46 @@ class AgentKitServiceProvider extends ServiceProvider
         });
     }
 
+    protected function registerErrorRecovery(): void
+    {
+        $this->app->bind(AlertNotifier::class, function ($app) {
+            if (!config('agent-kit.error_recovery.alerts.enabled', false)) {
+                return new NullNotifier();
+            }
+
+            return new DiscordNotifier(
+                webhookUrl: config('agent-kit.error_recovery.alerts.discord.webhook_url', ''),
+                mention: config('agent-kit.error_recovery.alerts.discord.mention_on_critical'),
+            );
+        });
+
+        $this->app->bind(Pipeline::class, function ($app) {
+            $classifier = new DefaultErrorClassifier();
+            $strategy = new AdaptiveRetryStrategy(
+                config('agent-kit.error_recovery.retry.policies', []),
+            );
+
+            $providerNames = array_keys(config('agent-kit.providers', []));
+
+            return new Pipeline([
+                new DiscordAlertMiddleware($app->make(AlertNotifier::class)),
+                new FallbackMiddleware(
+                    $classifier,
+                    $providerNames,
+                    config('agent-kit.error_recovery.fallback', []),
+                ),
+                new RetryMiddleware($strategy, $classifier),
+            ]);
+        });
+    }
+
     protected function registerAgent(): void
     {
         $this->app->bind(Agent::class, function ($app) {
             return new Agent(
                 container: $app,
                 config: config('agent-kit'),
+                pipeline: $app->make(Pipeline::class),
             );
         });
     }
