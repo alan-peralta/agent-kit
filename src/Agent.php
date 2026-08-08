@@ -13,6 +13,7 @@ use Peralta\AgentKit\DTOs\Context;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\DTOs\RecoveryContext;
 use Peralta\AgentKit\ErrorRecovery\Pipeline;
+use Peralta\AgentKit\Events\AgentKitEvent;
 use Peralta\AgentKit\Events\AgentRequestCompleted;
 use Peralta\AgentKit\Events\AgentRequestStarted;
 use Peralta\AgentKit\Events\ProviderCallCompleted;
@@ -212,7 +213,7 @@ class Agent
         }
     }
 
-    protected function dispatchEvent(\Peralta\AgentKit\Events\AgentKitEvent $event): void
+    protected function dispatchEvent(AgentKitEvent $event): void
     {
         if (!($this->config['analytics']['enabled'] ?? true)) return;
 
