@@ -14,6 +14,7 @@ class RecoveryContext
 
     public function __construct(
         public string $provider,
+        public readonly ?string $conversationId = null,
     ) {}
 
     public function recordAttempt(string $provider): void

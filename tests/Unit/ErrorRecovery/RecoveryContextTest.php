@@ -45,4 +45,18 @@ class RecoveryContextTest extends TestCase
             'anthropic' => ['attempts' => 1, 'last_error' => 'AUTH_ERROR'],
         ], $summary);
     }
+
+    public function test_holds_optional_conversation_id()
+    {
+        $ctx = new RecoveryContext(provider: 'openai', conversationId: 'conv-42');
+
+        $this->assertEquals('conv-42', $ctx->conversationId);
+    }
+
+    public function test_conversation_id_defaults_to_null()
+    {
+        $ctx = new RecoveryContext(provider: 'openai');
+
+        $this->assertNull($ctx->conversationId);
+    }
 }
