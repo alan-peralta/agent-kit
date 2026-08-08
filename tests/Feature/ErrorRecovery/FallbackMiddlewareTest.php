@@ -162,7 +162,7 @@ class FallbackMiddlewareTest extends TestCase
             // esperado
         }
 
-        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryAttempted::class, fn($e) => $e->strategy === 'fallback' && $e->provider === 'anthropic');
-        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryExhausted::class);
+        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryAttempted::class, fn($e) => $e->strategy === 'fallback' && $e->provider === 'anthropic' && $e->attemptNumber === 2);
+        \Illuminate\Support\Facades\Event::assertDispatched(\Peralta\AgentKit\Events\RecoveryExhausted::class, fn($e) => $e->attempts === 2);
     }
 }
