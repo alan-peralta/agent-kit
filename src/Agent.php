@@ -3,6 +3,7 @@
 namespace Peralta\AgentKit;
 
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Peralta\AgentKit\Contracts\Provider;
 use Peralta\AgentKit\Contracts\Tool;
@@ -12,6 +13,9 @@ use Peralta\AgentKit\DTOs\Context;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\DTOs\RecoveryContext;
 use Peralta\AgentKit\ErrorRecovery\Pipeline;
+use Peralta\AgentKit\Events\AgentRequestCompleted;
+use Peralta\AgentKit\Events\AgentRequestStarted;
+use Peralta\AgentKit\Events\ProviderCallCompleted;
 use Peralta\AgentKit\Exceptions\AgentException;
 use Peralta\AgentKit\Exceptions\MaxIterationsExceededException;
 use Peralta\AgentKit\Exceptions\ToolException;
@@ -116,6 +120,15 @@ class Agent
         $context = $this->context ?? new Context();
         $convo = $this->resolveConversation();
 
+        $startedAt = microtime(true);
+        $initialProviderName = $this->providerName ?? $this->config['default'];
+
+        $this->dispatchEvent(new AgentRequestStarted(
+            conversationId: $this->conversationId,
+            provider: $initialProviderName,
+            model: $this->model,
+        ));
+
         // Carrega histórico (se houver) e adiciona nova mensagem do usuário
         $messages = $convo && $this->conversationId ? $convo->load($this->conversationId) : [];
 
@@ -139,6 +152,8 @@ class Agent
                 conversationId: $this->conversationId,
             );
 
+            $callStartedAt = microtime(true);
+
             $response = $this->pipeline->execute(
                 function (RecoveryContext $context) use ($messages, $tools) {
                     $provider = $this->container->make("agent-kit.provider.{$context->provider}");
@@ -155,6 +170,14 @@ class Agent
 
             $provider = $this->container->make("agent-kit.provider.{$recoveryContext->provider}");
 
+            $this->dispatchEvent(new ProviderCallCompleted(
+                conversationId: $this->conversationId,
+                provider: $recoveryContext->provider,
+                model: $this->model,
+                durationMs: (int) round((microtime(true) - $callStartedAt) * 1000),
+                iterationNumber: $iteration,
+            ));
+
             $messages[] = $response->message;
             if ($convo && $this->conversationId) {
                 $convo->append($this->conversationId, $response->message);
@@ -162,6 +185,15 @@ class Agent
 
             if (!$response->hasToolCalls()) {
                 $this->logUsage($provider, $response);
+
+                $this->dispatchEvent(new AgentRequestCompleted(
+                    conversationId: $this->conversationId,
+                    provider: $recoveryContext->provider,
+                    model: $this->model,
+                    durationMs: (int) round((microtime(true) - $startedAt) * 1000),
+                    iterations: $iteration,
+                ));
+
                 return $response;
             }
 
@@ -178,6 +210,13 @@ class Agent
                 }
             }
         }
+    }
+
+    protected function dispatchEvent(\Peralta\AgentKit\Events\AgentKitEvent $event): void
+    {
+        if (!($this->config['analytics']['enabled'] ?? true)) return;
+
+        Event::dispatch($event);
     }
 
     protected function executeTool(?Tool $tool, $call, Context $context): mixed
