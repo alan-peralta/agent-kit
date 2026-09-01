@@ -1,1 +1,27 @@
+# Dependências resolvidas pelo Composer a partir do composer.json.
+# Um package NÃO versiona vendor/: quem instala o agent-kit resolve as
+# dependências no próprio vendor, e uma cópia commitada aqui só duplica
+# código e cria conflito de versão.
+/vendor/
+composer.phar
+
+# Variáveis de ambiente. O repositório é público — um .env real commitado
+# por engano vira vazamento imediato. Só o exemplo é versionado.
+.env
+.env.*
+!.env.example
+
+# Artefatos de teste e build
+.phpunit.result.cache
+/.phpunit.cache/
+/build/
+/coverage/
+
+# Editores e sistema operacional
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+
+# Worktrees locais
 .worktrees/
