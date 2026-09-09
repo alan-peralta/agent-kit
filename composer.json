@@ -15,7 +15,8 @@
         "illuminate/support": "^10.0|^11.0|^12.0",
         "illuminate/database": "^10.0|^11.0|^12.0",
         "illuminate/http": "^10.0|^11.0|^12.0",
-        "guzzlehttp/guzzle": "^7.0"
+        "guzzlehttp/guzzle": "^7.0",
+        "nikic/php-parser": "^5.8"
     },
     "require-dev": {
         "orchestra/testbench": "^8.0|^9.0|^10.0",
