@@ -1,0 +1,615 @@
+<?php
+
+namespace Peralta\AgentKit\Refactoring\Analysis\Ast;
+
+use PhpParser\Node;
+use PhpParser\NodeVisitorAbstract;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\Reference;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\Confidence;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyType;
+
+final class StructureCollector extends NodeVisitorAbstract
+{
+    private array $symbols = [];
+    private array $references = [];
+    private ?string $namespace = null;
+    private array $imports = [];
+    private array $classStack = [];
+    private ?string $currentClass = null;
+    private ?string $currentParent = null;
+    private ?string $currentMethod = null;
+    private ?array $symbol = null;
+    private array $propertyTypes = [];
+    private array $localTypes = [];
+    private readonly NameContext $nameContext;
+
+    public function __construct(
+        private readonly string $file,
+        private readonly array $facadePrefixes = [],
+    ) {
+        $this->nameContext = new NameContext();
+    }
+
+    public function symbols(): array
+    {
+        return $this->symbols;
+    }
+
+    public function references(): array
+    {
+        return $this->references;
+    }
+
+    public function namespace(): ?string
+    {
+        return $this->namespace;
+    }
+
+    public function imports(): array
+    {
+        return $this->imports;
+    }
+
+    public function enterNode(Node $node): null
+    {
+        if ($node instanceof Node\Stmt\Namespace_) {
+            $this->namespace = $node->name?->toString();
+
+            return null;
+        }
+
+        if ($node instanceof Node\Stmt\Use_) {
+            foreach ($node->uses as $use) {
+                $this->addImport($use->name->toString(), $use->getAlias()->toString(), $use->type ?: $node->type, $use);
+            }
+
+            return null;
+        }
+
+        if ($node instanceof Node\Stmt\GroupUse) {
+            foreach ($node->uses as $use) {
+                $name = $node->prefix->toString() . '\\' . $use->name->toString();
+                $this->addImport($name, $use->getAlias()->toString(), $use->type ?: $node->type, $use);
+            }
+
+            return null;
+        }
+
+        if ($node instanceof Node\Stmt\ClassLike) {
+            $this->enterClass($node);
+
+            return null;
+        }
+
+        if ($this->currentClass === null) {
+            return null;
+        }
+
+        if ($node instanceof Node\Stmt\ClassMethod) {
+            $this->enterMethod($node);
+        } elseif ($node instanceof Node\Stmt\Property) {
+            $this->collectProperty($node);
+        } elseif ($node instanceof Node\Stmt\ClassConst) {
+            $this->collectConstants($node);
+        } elseif ($node instanceof Node\Stmt\TraitUse) {
+            foreach ($node->traits as $trait) {
+                $this->addReference($this->resolvedName($trait), null, DependencyType::TRAIT, Confidence::EXACT, $node);
+            }
+        } elseif ($node instanceof Node\Expr\New_ && $node->class instanceof Node\Name) {
+            $this->addReference($this->resolvedName($node->class), null, DependencyType::INSTANTIATION, Confidence::EXACT, $node);
+        } elseif ($node instanceof Node\Expr\Assign) {
+            $this->collectAssignment($node);
+        } elseif ($node instanceof Node\Expr\MethodCall) {
+            $this->collectMethodCall($node);
+        } elseif ($node instanceof Node\Expr\StaticCall) {
+            $this->collectStaticCall($node);
+        } elseif ($node instanceof Node\Expr\ClassConstFetch) {
+            $this->collectClassConstant($node);
+        } elseif ($node instanceof Node\Expr\FuncCall) {
+            $this->collectFunctionCall($node);
+        }
+
+        return null;
+    }
+
+    public function leaveNode(Node $node): null
+    {
+        if ($node instanceof Node\Stmt\ClassMethod) {
+            $this->currentMethod = null;
+            $this->localTypes = [];
+        }
+
+        if ($node instanceof Node\Stmt\ClassLike) {
+            if ($this->currentClass !== null && $this->symbol !== null) {
+                $this->symbols[] = new SymbolDefinition(
+                    $this->currentClass,
+                    $this->symbol['kind'],
+                    $this->file,
+                    $this->symbol['line'],
+                    $this->symbol['methods'],
+                    $this->symbol['properties'],
+                    $this->symbol['constants'],
+                    array_values(array_unique($this->symbol['attributes'])),
+                );
+            }
+
+            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes]
+                = array_pop($this->classStack);
+            $this->nameContext->set($this->currentClass, $this->currentParent);
+        }
+
+        return null;
+    }
+
+    private function enterClass(Node\Stmt\ClassLike $node): void
+    {
+        $this->classStack[] = [
+            $this->currentClass,
+            $this->currentParent,
+            $this->currentMethod,
+            $this->symbol,
+            $this->propertyTypes,
+            $this->localTypes,
+        ];
+
+        $namespacedName = $node->namespacedName;
+        $this->currentClass = $namespacedName instanceof Node\Name
+            ? ltrim($namespacedName->toString(), '\\')
+            : null;
+        $this->currentMethod = null;
+        $this->propertyTypes = [];
+        $this->localTypes = [];
+
+        $parent = $node instanceof Node\Stmt\Class_ ? $node->extends : null;
+        $this->currentParent = $parent instanceof Node\Name ? $this->resolvedName($parent) : null;
+        $this->nameContext->set($this->currentClass, $this->currentParent);
+
+        if ($this->currentClass === null) {
+            $this->symbol = null;
+
+            return;
+        }
+
+        $this->symbol = [
+            'kind' => match (true) {
+                $node instanceof Node\Stmt\Interface_ => 'interface',
+                $node instanceof Node\Stmt\Trait_ => 'trait',
+                $node instanceof Node\Stmt\Enum_ => 'enum',
+                default => 'class',
+            },
+            'line' => $node->getStartLine(),
+            'methods' => [],
+            'properties' => [],
+            'constants' => [],
+            'attributes' => [],
+        ];
+        $this->primePropertyTypes($node);
+
+        if ($this->currentParent !== null) {
+            $this->addReference($this->currentParent, null, DependencyType::EXTENDS, Confidence::EXACT, $node);
+        }
+
+        if ($node instanceof Node\Stmt\Interface_) {
+            foreach ($node->extends as $interface) {
+                $this->addReference($this->resolvedName($interface), null, DependencyType::EXTENDS, Confidence::EXACT, $interface);
+            }
+        } elseif ($node instanceof Node\Stmt\Class_ || $node instanceof Node\Stmt\Enum_) {
+            foreach ($node->implements as $interface) {
+                $this->addReference($this->resolvedName($interface), null, DependencyType::IMPLEMENTS, Confidence::EXACT, $interface);
+            }
+        }
+
+        $this->collectAttributes($node);
+    }
+
+    private function primePropertyTypes(Node\Stmt\ClassLike $node): void
+    {
+        foreach ($node->stmts as $statement) {
+            if ($statement instanceof Node\Stmt\Property) {
+                $types = $this->classTypes($statement->type);
+                if (count($types) !== 1) {
+                    continue;
+                }
+                foreach ($statement->props as $property) {
+                    $this->propertyTypes[$property->name->toString()] = $types[0];
+                }
+            }
+
+            if ($statement instanceof Node\Stmt\ClassMethod
+                && $statement->name->toString() === '__construct') {
+                foreach ($statement->params as $param) {
+                    if ($param->flags === 0
+                        || !$param->var instanceof Node\Expr\Variable
+                        || !is_string($param->var->name)) {
+                        continue;
+                    }
+                    $types = $this->classTypes($param->type);
+                    if (count($types) === 1) {
+                        $this->propertyTypes[$param->var->name] = $types[0];
+                    }
+                }
+            }
+        }
+    }
+
+    private function enterMethod(Node\Stmt\ClassMethod $node): void
+    {
+        $this->currentMethod = $node->name->toString();
+        $this->localTypes = [];
+        $parameters = [];
+
+        foreach ($node->params as $param) {
+            $types = $this->classTypes($param->type);
+            $parameters[] = [
+                'name' => $param->var instanceof Node\Expr\Variable && is_string($param->var->name)
+                    ? $param->var->name
+                    : null,
+                'types' => $types,
+                'line' => $param->getStartLine(),
+            ];
+            foreach ($types as $type) {
+                $dependencyType = $this->currentMethod === '__construct'
+                    ? DependencyType::CONSTRUCTOR_INJECTION
+                    : DependencyType::METHOD_PARAMETER;
+                $this->addReference($type, null, $dependencyType, Confidence::EXACT, $param);
+            }
+
+            if ($param->var instanceof Node\Expr\Variable && is_string($param->var->name) && count($types) === 1) {
+                $this->localTypes[$param->var->name] = $types[0];
+            }
+
+            if ($param->flags !== 0 && $param->var instanceof Node\Expr\Variable && is_string($param->var->name)) {
+                $this->symbol['properties'][] = [
+                    'name' => $param->var->name,
+                    'types' => $types,
+                    'line' => $param->getStartLine(),
+                ];
+                if (count($types) === 1) {
+                    $this->propertyTypes[$param->var->name] = $types[0];
+                }
+                if ($types !== []) {
+                    foreach ($types as $type) {
+                        $this->addReference($type, null, DependencyType::PROPERTY_TYPE, Confidence::EXACT, $param);
+                    }
+                }
+            }
+        }
+
+        $returnTypes = $this->classTypes($node->returnType);
+        foreach ($returnTypes as $type) {
+            $this->addReference($type, null, DependencyType::RETURN_TYPE, Confidence::EXACT, $node);
+        }
+
+        $this->symbol['methods'][] = [
+            'name' => $this->currentMethod,
+            'parameters' => $parameters,
+            'return_types' => $returnTypes,
+            'line' => $node->getStartLine(),
+        ];
+
+        $this->collectAttributes($node);
+    }
+
+    private function collectProperty(Node\Stmt\Property $node): void
+    {
+        $types = $this->classTypes($node->type);
+        foreach ($node->props as $property) {
+            $name = $property->name->toString();
+            $this->symbol['properties'][] = [
+                'name' => $name,
+                'types' => $types,
+                'line' => $property->getStartLine(),
+            ];
+            if (count($types) === 1) {
+                $this->propertyTypes[$name] = $types[0];
+            }
+        }
+        foreach ($types as $type) {
+            $this->addReference($type, null, DependencyType::PROPERTY_TYPE, Confidence::EXACT, $node);
+        }
+        $this->collectAttributes($node);
+    }
+
+    private function collectConstants(Node\Stmt\ClassConst $node): void
+    {
+        foreach ($node->consts as $constant) {
+            $this->symbol['constants'][] = [
+                'name' => $constant->name->toString(),
+                'line' => $constant->getStartLine(),
+            ];
+        }
+        $this->collectAttributes($node);
+    }
+
+    private function collectAssignment(Node\Expr\Assign $node): void
+    {
+        if (!$node->var instanceof Node\Expr\Variable || !is_string($node->var->name)) {
+            return;
+        }
+
+        $target = null;
+        if ($node->expr instanceof Node\Expr\New_ && $node->expr->class instanceof Node\Name) {
+            $target = $this->resolvedName($node->expr->class);
+        } else {
+            $target = $this->containerClassArgument($node->expr);
+        }
+
+        if ($target !== null) {
+            $this->localTypes[$node->var->name] = $target;
+        }
+    }
+
+    private function collectMethodCall(Node\Expr\MethodCall $node): void
+    {
+        if (!$node->name instanceof Node\Identifier) {
+            $this->addReference(null, null, DependencyType::METHOD_CALL, Confidence::UNKNOWN, $node);
+
+            return;
+        }
+
+        $method = $node->name->toString();
+        if ($method === 'make' && $this->isAppCall($node->var)) {
+            $target = $this->classNameArgument($node->args[0]->value ?? null);
+            if ($target !== null) {
+                $this->addReference(
+                    $target,
+                    null,
+                    DependencyType::INSTANTIATION,
+                    Confidence::INFERRED,
+                    $node,
+                    ['resolution' => 'app_make'],
+                );
+            }
+
+            return;
+        }
+
+        [$target, $confidence] = $this->receiverType($node->var);
+        $this->addReference($target, $method, DependencyType::METHOD_CALL, $confidence, $node);
+    }
+
+    private function collectStaticCall(Node\Expr\StaticCall $node): void
+    {
+        if (!$node->class instanceof Node\Name || !$node->name instanceof Node\Identifier) {
+            $this->addReference(null, null, DependencyType::STATIC_CALL, Confidence::UNKNOWN, $node);
+
+            return;
+        }
+
+        $target = $this->resolvedName($node->class);
+        $method = $node->name->toString();
+
+        if ($method === 'dispatch') {
+            $dispatched = $this->newClassArgument($node->args[0]->value ?? null);
+            if ($dispatched !== null) {
+                $kind = $target === 'Illuminate\\Support\\Facades\\Event' ? 'event' : 'job';
+                $this->addReference($dispatched, null, DependencyType::EVENT, Confidence::EXACT, $node, ['dispatch_kind' => $kind]);
+            } elseif (!$this->isFacade($target)) {
+                $this->addReference($target, null, DependencyType::EVENT, Confidence::EXACT, $node, ['dispatch_kind' => 'job']);
+            }
+        }
+
+        $type = $this->isFacade($target) ? DependencyType::FACADE : DependencyType::STATIC_CALL;
+        $this->addReference($target, $method, $type, Confidence::EXACT, $node);
+    }
+
+    private function collectClassConstant(Node\Expr\ClassConstFetch $node): void
+    {
+        if (!$node->class instanceof Node\Name || !$node->name instanceof Node\Identifier) {
+            return;
+        }
+
+        $constant = $node->name->toString();
+        if (strtolower($constant) === 'class') {
+            return;
+        }
+
+        $this->addReference(
+            $this->resolvedName($node->class),
+            null,
+            DependencyType::CLASS_CONSTANT,
+            Confidence::EXACT,
+            $node,
+            ['constant' => $constant],
+        );
+    }
+
+    private function collectFunctionCall(Node\Expr\FuncCall $node): void
+    {
+        if (!$node->name instanceof Node\Name || count($node->name->getParts()) !== 1) {
+            return;
+        }
+
+        $function = strtolower($node->name->getLast());
+        if (in_array($function, ['event', 'dispatch'], true)) {
+            $target = $this->newClassArgument($node->args[0]->value ?? null);
+            if ($target !== null) {
+                $this->addReference(
+                    $target,
+                    null,
+                    DependencyType::EVENT,
+                    Confidence::EXACT,
+                    $node,
+                    ['dispatch_kind' => $function === 'event' ? 'event' : 'job'],
+                );
+            }
+
+            return;
+        }
+
+        if (in_array($function, ['app', 'resolve'], true)) {
+            $target = $this->classNameArgument($node->args[0]->value ?? null);
+            if ($target !== null) {
+                $this->addReference(
+                    $target,
+                    null,
+                    DependencyType::INSTANTIATION,
+                    Confidence::INFERRED,
+                    $node,
+                    ['resolution' => $function],
+                );
+            }
+        }
+    }
+
+    private function receiverType(Node\Expr $receiver): array
+    {
+        if ($receiver instanceof Node\Expr\PropertyFetch
+            && $receiver->var instanceof Node\Expr\Variable
+            && $receiver->var->name === 'this'
+            && $receiver->name instanceof Node\Identifier) {
+            return [$this->propertyTypes[$receiver->name->toString()] ?? null, Confidence::INFERRED];
+        }
+
+        if ($receiver instanceof Node\Expr\Variable && is_string($receiver->name)) {
+            return [$this->localTypes[$receiver->name] ?? null, Confidence::INFERRED];
+        }
+
+        $containerType = $this->containerClassArgument($receiver);
+        if ($containerType !== null) {
+            return [$containerType, Confidence::INFERRED];
+        }
+
+        return [null, Confidence::UNKNOWN];
+    }
+
+    private function containerClassArgument(Node\Expr $expression): ?string
+    {
+        if ($expression instanceof Node\Expr\FuncCall
+            && $expression->name instanceof Node\Name
+            && in_array(strtolower($expression->name->getLast()), ['app', 'resolve'], true)) {
+            return $this->classNameArgument($expression->args[0]->value ?? null);
+        }
+
+        if ($expression instanceof Node\Expr\MethodCall
+            && $expression->name instanceof Node\Identifier
+            && $expression->name->toString() === 'make'
+            && $this->isAppCall($expression->var)) {
+            return $this->classNameArgument($expression->args[0]->value ?? null);
+        }
+
+        return null;
+    }
+
+    private function classNameArgument(?Node\Expr $expression): ?string
+    {
+        if (!$expression instanceof Node\Expr\ClassConstFetch
+            || !$expression->class instanceof Node\Name
+            || !$expression->name instanceof Node\Identifier
+            || strtolower($expression->name->toString()) !== 'class') {
+            return null;
+        }
+
+        return $this->resolvedName($expression->class);
+    }
+
+    private function newClassArgument(?Node\Expr $expression): ?string
+    {
+        return $expression instanceof Node\Expr\New_ && $expression->class instanceof Node\Name
+            ? $this->resolvedName($expression->class)
+            : null;
+    }
+
+    private function isAppCall(Node\Expr $expression): bool
+    {
+        return $expression instanceof Node\Expr\FuncCall
+            && $expression->name instanceof Node\Name
+            && strtolower($expression->name->getLast()) === 'app';
+    }
+
+    private function isFacade(?string $fqcn): bool
+    {
+        if ($fqcn === null) {
+            return false;
+        }
+        foreach ($this->facadePrefixes as $prefix) {
+            if (str_starts_with($fqcn, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function collectAttributes(Node $node): void
+    {
+        if (!property_exists($node, 'attrGroups')) {
+            return;
+        }
+        foreach ($node->attrGroups as $group) {
+            foreach ($group->attrs as $attribute) {
+                $target = $this->resolvedName($attribute->name);
+                if ($target !== null) {
+                    $this->symbol['attributes'][] = $target;
+                    $this->addReference($target, null, DependencyType::ATTRIBUTE, Confidence::EXACT, $attribute);
+                }
+            }
+        }
+    }
+
+    private function addImport(string $name, string $alias, int $type, Node $node): void
+    {
+        $this->imports[] = [
+            'name' => ltrim($name, '\\'),
+            'alias' => $alias,
+            'type' => match ($type) {
+                Node\Stmt\Use_::TYPE_FUNCTION => 'function',
+                Node\Stmt\Use_::TYPE_CONSTANT => 'constant',
+                default => 'class',
+            },
+            'line' => $node->getStartLine(),
+        ];
+    }
+
+    private function classTypes(Node|string|null $type): array
+    {
+        if ($type instanceof Node\NullableType) {
+            return $this->classTypes($type->type);
+        }
+        if ($type instanceof Node\UnionType || $type instanceof Node\IntersectionType) {
+            $types = [];
+            foreach ($type->types as $member) {
+                $types = array_merge($types, $this->classTypes($member));
+            }
+
+            return array_values(array_unique($types));
+        }
+        if ($type instanceof Node\Name) {
+            $resolved = $this->resolvedName($type);
+
+            return $resolved === null ? [] : [$resolved];
+        }
+
+        return [];
+    }
+
+    private function resolvedName(Node\Name $name): ?string
+    {
+        return $this->nameContext->resolve($name->toString());
+    }
+
+    private function addReference(
+        ?string $target,
+        ?string $targetMethod,
+        DependencyType $type,
+        Confidence $confidence,
+        Node $node,
+        array $metadata = [],
+    ): void {
+        if ($this->currentClass === null) {
+            return;
+        }
+        $this->references[] = new Reference(
+            $this->currentClass,
+            $this->currentMethod,
+            $target,
+            $targetMethod,
+            $type,
+            $target === null ? Confidence::UNKNOWN : $confidence,
+            $this->file,
+            $node->getStartLine(),
+            $metadata,
+        );
+    }
+}

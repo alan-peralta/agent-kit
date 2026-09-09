@@ -258,3 +258,23 @@ Eventos disparados:
 - `ToolCallExecuted` — disparado após cada execução de tool
 - `RecoveryAttempted` — disparado a cada tentativa de retry/fallback
 - `RecoveryExhausted` — disparado quando todas as tentativas de recuperação se esgotam
+
+## Refactoring Agent
+
+O Agent Kit inclui um auditor inicial de refatoração para PHP/Laravel. Ele coleta sinais determinísticos do codebase para que agentes de coding possam raciocinar com dados objetivos antes de propor mudanças.
+
+```bash
+php artisan agent-kit:refactor-audit
+php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
+php artisan agent-kit:refactor-callers "App\Services\PaymentService" --method=charge
+php artisan agent-kit:refactor-dependencies "App\Services\PaymentService"
+php artisan agent-kit:refactor-impact "App\Services\PaymentService"
+```
+
+Use `--path=/caminho/do/projeto` para analisar outra raiz e `--json` para obter
+saída estruturada adequada a agentes e automações. Todos os comandos são
+somente de análise: nenhum deles modifica o código examinado.
+
+Os relatórios de auditoria são gravados em `.agent-kit/refactoring/`. Veja
+[REFACTORING_AGENT.md](REFACTORING_AGENT.md) para arquitetura, tipos de
+dependência, níveis de confiança, workflow e limitações.
