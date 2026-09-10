@@ -26,7 +26,11 @@ final readonly class RefactoringTarget
         $value = ltrim(trim($value), '\\');
         $method = $method === null ? null : trim($method);
 
-        if ($value === '' || $method === '') {
+        if (
+            $value === ''
+            || $method === ''
+            || ($method !== null && preg_match('/^[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*$/', $method) !== 1)
+        ) {
             throw new InvalidArgumentException('The refactoring target must contain a class and, when present, a method.');
         }
 

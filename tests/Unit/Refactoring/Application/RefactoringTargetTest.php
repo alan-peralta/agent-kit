@@ -41,6 +41,9 @@ final class RefactoringTargetTest extends TestCase
             'empty class' => ['::run'],
             'empty method' => ['App\\Service::'],
             'multiple separators' => ['App\\Service::run::again'],
+            'extra colon before method' => ['App\\Service:::run'],
+            'colon within method' => ['App\\Service::run:again'],
+            'method call syntax' => ['App\\Service::run()'],
         ];
     }
 }
