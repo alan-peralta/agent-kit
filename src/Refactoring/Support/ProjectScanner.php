@@ -15,7 +15,7 @@ final class ProjectScanner
 
     public function phpFiles(string $root): array
     {
-        $root = rtrim(realpath($root) ?: $root, DIRECTORY_SEPARATOR);
+        $root = $this->normalizedRoot($root);
         if (!is_dir($root)) {
             throw new \InvalidArgumentException("Diretório não encontrado: {$root}");
         }
@@ -46,9 +46,9 @@ final class ProjectScanner
 
     public function scan(string $root): array
     {
-        $root = rtrim(realpath($root) ?: $root, DIRECTORY_SEPARATOR);
+        $root = $this->normalizedRoot($root);
         $files = array_map(function (string $path) use ($root) {
-            $relative = ltrim(str_replace($root, '', $path), DIRECTORY_SEPARATOR);
+            $relative = ProjectRoot::relative($root, $path);
 
             return $this->analyzer->analyze($path, $relative);
         }, $this->phpFiles($root));
@@ -60,7 +60,7 @@ final class ProjectScanner
 
     private function isExcluded(string $path, string $root): bool
     {
-        $relative = str_replace('\\', '/', ltrim(str_replace($root, '', $path), DIRECTORY_SEPARATOR));
+        $relative = ProjectRoot::relative($root, $path);
         foreach ($this->excludedDirectories as $directory) {
             $directory = trim(str_replace('\\', '/', $directory), '/');
             if ($directory !== '' && ($relative === $directory || str_starts_with($relative, $directory . '/'))) {
@@ -68,5 +68,10 @@ final class ProjectScanner
             }
         }
         return false;
+    }
+
+    private function normalizedRoot(string $root): string
+    {
+        return ProjectRoot::normalize($root);
     }
 }

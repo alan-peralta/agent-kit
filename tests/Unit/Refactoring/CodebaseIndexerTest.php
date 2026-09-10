@@ -14,6 +14,15 @@ use PHPUnit\Framework\TestCase;
 
 final class CodebaseIndexerTest extends TestCase
 {
+    public function test_its_normalization_seam_preserves_a_filesystem_root_without_building(): void
+    {
+        $scanner = new ProjectScanner(new PhpFileAnalyzer());
+        $indexer = new CodebaseIndexer($scanner, new PhpAstParser());
+        $method = new \ReflectionMethod($indexer, 'normalizedRoot');
+
+        $this->assertSame(realpath(DIRECTORY_SEPARATOR), $method->invoke($indexer, DIRECTORY_SEPARATOR));
+    }
+
     public function test_it_parses_every_discovered_file_once(): void
     {
         $root = sys_get_temp_dir() . '/agent-kit-index-' . bin2hex(random_bytes(6));

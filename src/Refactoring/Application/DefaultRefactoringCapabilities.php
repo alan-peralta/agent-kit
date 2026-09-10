@@ -9,6 +9,7 @@ use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndex;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
+use Peralta\AgentKit\Refactoring\Support\ProjectRoot;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
 use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
 
@@ -210,7 +211,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             );
         }
 
-        return dirname($root) === $root ? $root : rtrim($root, DIRECTORY_SEPARATOR);
+        return ProjectRoot::normalize($root);
     }
 
     private function target(string $target): RefactoringTarget
@@ -290,26 +291,17 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
 
     private function relativePath(string $root, string $file): string
     {
-        $prefix = $this->rootPrefix($root);
-
-        return str_starts_with($file, $prefix)
-            ? str_replace('\\', '/', substr($file, strlen($prefix)))
-            : str_replace('\\', '/', $file);
+        return ProjectRoot::relative($root, $file);
     }
 
     private function ensureInsideProject(string $root, string $path): void
     {
-        if ($path !== $root && !str_starts_with($path, $this->rootPrefix($root))) {
+        if (!ProjectRoot::contains($root, $path)) {
             throw new CapabilityException(
                 'TARGET_OUTSIDE_PROJECT',
                 'Target file must be inside the project root.',
             );
         }
-    }
-
-    private function rootPrefix(string $root): string
-    {
-        return str_ends_with($root, DIRECTORY_SEPARATOR) ? $root : $root . DIRECTORY_SEPARATOR;
     }
 
     private function requireClass(CodebaseIndex $index, string $class): SymbolDefinition

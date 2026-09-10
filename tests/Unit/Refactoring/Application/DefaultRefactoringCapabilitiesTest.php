@@ -244,9 +244,44 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         }
     }
 
-    public function test_it_rejects_absolute_relative_and_symlink_paths_outside_the_project(): void
+    public function test_it_always_rejects_absolute_and_relative_paths_outside_the_project(): void
     {
         $parent = sys_get_temp_dir() . '/agent-kit-containment-' . bin2hex(random_bytes(6));
+        $root = $parent . '/project';
+        $outside = $parent . '/Outside.php';
+
+        try {
+            $this->assertTrue(mkdir($root, 0777, true));
+            $this->assertNotFalse(file_put_contents($outside, "<?php\nclass Outside {}\n"));
+
+            foreach ([$outside, '../Outside.php'] as $target) {
+                try {
+                    $this->service()->analyze($root, $target);
+                    $this->fail("Expected outside-project rejection for {$target}.");
+                } catch (CapabilityException $exception) {
+                    $this->assertSame('TARGET_OUTSIDE_PROJECT', $exception->errorCode);
+                    $this->assertSame(
+                        'Target file must be inside the project root.',
+                        $exception->getMessage(),
+                    );
+                }
+            }
+        } finally {
+            if (is_file($outside)) {
+                unlink($outside);
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+            if (is_dir($parent)) {
+                rmdir($parent);
+            }
+        }
+    }
+
+    public function test_it_rejects_a_symlink_that_escapes_the_project(): void
+    {
+        $parent = sys_get_temp_dir() . '/agent-kit-symlink-' . bin2hex(random_bytes(6));
         $root = $parent . '/project';
         $outside = $parent . '/Outside.php';
         $link = $root . '/Linked.php';
@@ -259,17 +294,15 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
             }
             $this->assertTrue(is_link($link));
 
-            foreach ([$outside, '../Outside.php', 'Linked.php'] as $target) {
-                try {
-                    $this->service()->analyze($root, $target);
-                    $this->fail("Expected outside-project rejection for {$target}.");
-                } catch (CapabilityException $exception) {
-                    $this->assertSame('TARGET_OUTSIDE_PROJECT', $exception->errorCode);
-                    $this->assertSame(
-                        'Target file must be inside the project root.',
-                        $exception->getMessage(),
-                    );
-                }
+            try {
+                $this->service()->analyze($root, 'Linked.php');
+                $this->fail('Expected outside-project rejection for a symbolic link.');
+            } catch (CapabilityException $exception) {
+                $this->assertSame('TARGET_OUTSIDE_PROJECT', $exception->errorCode);
+                $this->assertSame(
+                    'Target file must be inside the project root.',
+                    $exception->getMessage(),
+                );
             }
         } finally {
             if (is_link($link)) {

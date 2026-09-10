@@ -8,6 +8,14 @@ use PHPUnit\Framework\TestCase;
 
 class ProjectScannerTest extends TestCase
 {
+    public function test_its_normalization_seam_preserves_a_filesystem_root(): void
+    {
+        $scanner = new ProjectScanner(new PhpFileAnalyzer());
+        $method = new \ReflectionMethod($scanner, 'normalizedRoot');
+
+        $this->assertSame(realpath(DIRECTORY_SEPARATOR), $method->invoke($scanner, DIRECTORY_SEPARATOR));
+    }
+
     public function test_it_discovers_normalized_php_paths_without_analyzing_them(): void
     {
         $root = $this->fixtureRoot();
