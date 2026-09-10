@@ -67,10 +67,13 @@ final class CallerAnalyzer
         array $firstHopDependents,
     ): array
     {
-        $roots = array_values(array_unique(array_map(
-            fn (string $root) => ltrim($root, '\\'),
-            array_keys($firstHopDependents),
-        )));
+        $roots = array_values(array_filter(
+            array_unique(array_map(
+                fn (string $root) => ltrim($root, '\\'),
+                array_keys($firstHopDependents),
+            )),
+            fn (string $root) => $root !== $target,
+        ));
         sort($roots, SORT_STRING);
 
         $visited = [$target => true];

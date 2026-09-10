@@ -90,6 +90,46 @@ final class ImpactAnalyzerTest extends TestCase
         $this->assertSame('charge', $result->toArray()['method']);
     }
 
+    public function test_a_matching_self_call_does_not_inflate_method_impact(): void
+    {
+        $graph = new DependencyGraph();
+        foreach (['Target', 'StatusCaller'] as $name) {
+            $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
+        }
+        $graph->addEdge(new DependencyEdge(
+            'Target',
+            'run',
+            'Target',
+            'charge',
+            DependencyType::METHOD_CALL,
+            Confidence::EXACT,
+            'Target.php',
+            5,
+        ));
+        $graph->addEdge(new DependencyEdge(
+            'StatusCaller',
+            'run',
+            'Target',
+            'status',
+            DependencyType::METHOD_CALL,
+            Confidence::EXACT,
+            'StatusCaller.php',
+            5,
+        ));
+
+        $result = (new ImpactAnalyzer([
+            'low_max' => 0,
+            'medium_max' => 1,
+            'high_max' => 2,
+        ]))->analyze($this->index($graph, ['Target', 'StatusCaller']), 'Target', 'charge');
+
+        $this->assertSame(['Target'], array_column($result->direct, 'source'));
+        $this->assertSame(0, $result->transitiveDependents);
+        $this->assertNotContains('StatusCaller', array_column($result->transitive, 'fqcn'));
+        $this->assertSame(1, $result->affectedFiles);
+        $this->assertSame('MEDIUM', $result->risk);
+    }
+
     #[DataProvider('riskCases')]
     public function test_it_applies_configured_risk_boundaries(int $dependents, string $expected): void
     {

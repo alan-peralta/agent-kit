@@ -103,6 +103,31 @@ final class CallerAnalyzerTest extends TestCase
         }
     }
 
+    public function test_method_scope_does_not_use_a_matching_self_call_as_a_traversal_root(): void
+    {
+        $graph = new DependencyGraph();
+        foreach (['Target', 'StatusCaller'] as $name) {
+            $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
+        }
+        $graph->addEdge($this->edge('Target', 'Target', DependencyType::METHOD_CALL, 'charge'));
+        $graph->addEdge($this->edge('StatusCaller', 'Target', DependencyType::METHOD_CALL, 'status'));
+
+        $symbols = [
+            'Target' => new SymbolDefinition('Target', 'class', 'Target.php', 1),
+            'StatusCaller' => new SymbolDefinition('StatusCaller', 'class', 'StatusCaller.php', 1),
+        ];
+
+        $result = (new CallerAnalyzer())->findCallers(new CodebaseIndex($symbols, $graph), 'Target', 'charge');
+
+        $this->assertSame(['Target'], array_column($result->directCallers, 'source'));
+        $this->assertSame([], $result->transitiveDependents);
+        foreach ($result->transitiveDependents as $dependent) {
+            $pathBeforeTarget = $dependent['path'];
+            $this->assertSame('Target', array_pop($pathBeforeTarget));
+            $this->assertNotContains('Target', $pathBeforeTarget);
+        }
+    }
+
     public function test_it_returns_only_non_direct_non_structural_transitive_dependents(): void
     {
         $graph = new DependencyGraph();
