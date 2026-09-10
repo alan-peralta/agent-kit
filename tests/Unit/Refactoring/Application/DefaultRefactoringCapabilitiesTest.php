@@ -391,6 +391,28 @@ PHP));
         );
     }
 
+    public function test_filesystem_root_containment_accepts_a_direct_child(): void
+    {
+        $root = (string) realpath(DIRECTORY_SEPARATOR);
+        $child = $root . (str_ends_with($root, DIRECTORY_SEPARATOR) ? '' : DIRECTORY_SEPARATOR)
+            . 'tmp' . DIRECTORY_SEPARATOR . 'RootChild.php';
+        $method = new \ReflectionMethod(DefaultRefactoringCapabilities::class, 'ensureInsideProject');
+
+        $method->invoke($this->service(), $root, $child);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_filesystem_root_relativization_uses_one_separator(): void
+    {
+        $root = (string) realpath(DIRECTORY_SEPARATOR);
+        $child = $root . (str_ends_with($root, DIRECTORY_SEPARATOR) ? '' : DIRECTORY_SEPARATOR)
+            . 'tmp' . DIRECTORY_SEPARATOR . 'RootChild.php';
+        $method = new \ReflectionMethod(DefaultRefactoringCapabilities::class, 'relativePath');
+
+        $this->assertSame('tmp/RootChild.php', $method->invoke($this->service(), $root, $child));
+    }
+
     public function test_it_finds_callers_and_moves_partial_data_to_the_envelope(): void
     {
         $result = $this->service()->findCallers(

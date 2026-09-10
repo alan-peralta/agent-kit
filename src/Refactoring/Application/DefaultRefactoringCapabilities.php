@@ -290,7 +290,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
 
     private function relativePath(string $root, string $file): string
     {
-        $prefix = $root . DIRECTORY_SEPARATOR;
+        $prefix = $this->rootPrefix($root);
 
         return str_starts_with($file, $prefix)
             ? str_replace('\\', '/', substr($file, strlen($prefix)))
@@ -299,12 +299,17 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
 
     private function ensureInsideProject(string $root, string $path): void
     {
-        if ($path !== $root && !str_starts_with($path, $root . DIRECTORY_SEPARATOR)) {
+        if ($path !== $root && !str_starts_with($path, $this->rootPrefix($root))) {
             throw new CapabilityException(
                 'TARGET_OUTSIDE_PROJECT',
                 'Target file must be inside the project root.',
             );
         }
+    }
+
+    private function rootPrefix(string $root): string
+    {
+        return str_ends_with($root, DIRECTORY_SEPARATOR) ? $root : $root . DIRECTORY_SEPARATOR;
     }
 
     private function requireClass(CodebaseIndex $index, string $class): SymbolDefinition
