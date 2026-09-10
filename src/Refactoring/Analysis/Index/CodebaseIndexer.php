@@ -3,6 +3,7 @@
 namespace Peralta\AgentKit\Refactoring\Analysis\Index;
 
 use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\Reference;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyEdge;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyGraph;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyNode;
@@ -21,7 +22,8 @@ final class CodebaseIndexer
         $symbols = [];
         $diagnostics = [];
         $references = [];
-        $unresolved = [];
+        /** @var list<Reference> $unresolvedReferences */
+        $unresolvedReferences = [];
         $graph = new DependencyGraph();
 
         foreach ($this->scanner->phpFiles($root) as $file) {
@@ -43,7 +45,7 @@ final class CodebaseIndexer
 
         foreach ($references as $reference) {
             if ($reference->target === null) {
-                $unresolved[] = $reference;
+                $unresolvedReferences[] = $reference;
                 continue;
             }
             $graph->addEdge(new DependencyEdge(
@@ -61,6 +63,6 @@ final class CodebaseIndexer
 
         ksort($symbols, SORT_STRING);
 
-        return new CodebaseIndex($symbols, $graph, $diagnostics, $unresolved);
+        return new CodebaseIndex($symbols, $graph, $diagnostics, $unresolvedReferences);
     }
 }

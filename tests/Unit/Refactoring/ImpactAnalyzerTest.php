@@ -45,7 +45,8 @@ final class ImpactAnalyzerTest extends TestCase
     public function test_it_scopes_direct_impact_to_a_method(): void
     {
         $graph = new DependencyGraph();
-        foreach (['Target', 'ChargeCaller', 'StatusCaller'] as $name) {
+        $names = ['Target', 'ChargeCaller', 'ChargeParent', 'StatusCaller', 'StatusParent'];
+        foreach ($names as $name) {
             $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
         }
         $graph->addEdge(new DependencyEdge(
@@ -68,9 +69,11 @@ final class ImpactAnalyzerTest extends TestCase
             'StatusCaller.php',
             5,
         ));
+        $graph->addEdge($this->edge('ChargeParent', 'ChargeCaller', DependencyType::CONSTRUCTOR_INJECTION, 'ChargeParent.php'));
+        $graph->addEdge($this->edge('StatusParent', 'StatusCaller', DependencyType::CONSTRUCTOR_INJECTION, 'StatusParent.php'));
 
         $result = (new ImpactAnalyzer())->analyze(
-            $this->index($graph, ['Target', 'ChargeCaller', 'StatusCaller']),
+            $this->index($graph, $names),
             'Target',
             'charge',
         );
@@ -78,6 +81,12 @@ final class ImpactAnalyzerTest extends TestCase
         $this->assertSame('charge', $result->method);
         $this->assertSame(1, $result->directCallers);
         $this->assertSame(['ChargeCaller'], array_column($result->direct, 'source'));
+        $this->assertSame(1, $result->transitiveDependents);
+        $this->assertSame(['ChargeParent'], array_column($result->transitive, 'fqcn'));
+        $this->assertNotContains('StatusCaller', array_column($result->transitive, 'fqcn'));
+        $this->assertNotContains('StatusParent', array_column($result->transitive, 'fqcn'));
+        $this->assertSame(2, $result->affectedFiles);
+        $this->assertSame('LOW', $result->risk);
         $this->assertSame('charge', $result->toArray()['method']);
     }
 

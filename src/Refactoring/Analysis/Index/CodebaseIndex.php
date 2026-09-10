@@ -2,6 +2,7 @@
 
 namespace Peralta\AgentKit\Refactoring\Analysis\Index;
 
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\Reference;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyGraph;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyType;
@@ -11,11 +12,12 @@ final readonly class CodebaseIndex
     private array $methodsByClass;
     private array $symbolsByFile;
 
+    /** @param list<Reference> $unresolvedReferences */
     public function __construct(
         private array $symbols,
         private DependencyGraph $dependencyGraph,
         private array $parseDiagnostics = [],
-        private array $unresolved = [],
+        private array $unresolvedReferences = [],
     ) {
         $methods = [];
         $files = [];
@@ -78,9 +80,13 @@ final readonly class CodebaseIndex
         return $this->parseDiagnostics;
     }
 
+    /** @return list<array<string, mixed>> */
     public function unresolvedReferences(): array
     {
-        return array_map(fn ($reference) => $reference->toArray(), $this->unresolved);
+        return array_values(array_map(
+            fn (Reference $reference) => $reference->toArray(),
+            $this->unresolvedReferences,
+        ));
     }
 
     private function normalize(string $fqcn): string

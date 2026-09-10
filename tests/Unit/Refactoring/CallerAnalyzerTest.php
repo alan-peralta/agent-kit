@@ -36,7 +36,33 @@ final class CallerAnalyzerTest extends TestCase
         $this->assertIsArray($result->unresolved);
         $this->assertArrayHasKey('transitive_dependents', $result->toArray());
         $this->assertArrayHasKey('unresolved', $result->toArray());
+        $this->assertSame('project', $result->toArray()['unresolved_scope']);
         $this->assertSame($result->toArray(), json_decode(json_encode($result->toArray()), true));
+    }
+
+    public function test_method_scope_excludes_other_method_callers_and_their_dependents(): void
+    {
+        $graph = new DependencyGraph();
+        $names = ['Target', 'ChargeCaller', 'ChargeParent', 'StatusCaller', 'StatusParent'];
+        foreach ($names as $name) {
+            $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
+        }
+        $graph->addEdge($this->edge('ChargeCaller', 'Target', DependencyType::METHOD_CALL, 'charge'));
+        $graph->addEdge($this->edge('ChargeParent', 'ChargeCaller', DependencyType::CONSTRUCTOR_INJECTION));
+        $graph->addEdge($this->edge('StatusCaller', 'Target', DependencyType::METHOD_CALL, 'status'));
+        $graph->addEdge($this->edge('StatusParent', 'StatusCaller', DependencyType::CONSTRUCTOR_INJECTION));
+
+        $symbols = [];
+        foreach ($names as $name) {
+            $symbols[$name] = new SymbolDefinition($name, 'class', "{$name}.php", 1);
+        }
+
+        $result = (new CallerAnalyzer())->findCallers(new CodebaseIndex($symbols, $graph), 'Target', 'charge');
+
+        $this->assertSame(['ChargeCaller'], array_column($result->directCallers, 'source'));
+        $this->assertSame(['ChargeParent'], array_column($result->transitiveDependents, 'fqcn'));
+        $this->assertNotContains('StatusCaller', array_column($result->transitiveDependents, 'fqcn'));
+        $this->assertNotContains('StatusParent', array_column($result->transitiveDependents, 'fqcn'));
     }
 
     public function test_it_returns_only_non_direct_non_structural_transitive_dependents(): void
@@ -101,8 +127,13 @@ final class CallerAnalyzerTest extends TestCase
         ))->build($root);
     }
 
-    private function edge(string $source, string $target, DependencyType $type): DependencyEdge
+    private function edge(
+        string $source,
+        string $target,
+        DependencyType $type,
+        string $targetMethod = 'go',
+    ): DependencyEdge
     {
-        return new DependencyEdge($source, 'run', $target, 'go', $type, Confidence::EXACT, "{$source}.php", 5);
+        return new DependencyEdge($source, 'run', $target, $targetMethod, $type, Confidence::EXACT, "{$source}.php", 5);
     }
 }
