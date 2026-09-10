@@ -70,5 +70,8 @@ final class CodebaseIndexerTest extends TestCase
             [DependencyType::METHOD_CALL->value],
             array_values(array_unique(array_map(fn ($edge) => $edge->type->value, $index->findMethodCalls('Fixtures\\Payments\\PaymentService', 'charge')))),
         );
+        $this->assertNotEmpty($index->unresolvedReferences());
+        $this->assertContains('unknown', array_column($index->unresolvedReferences(), 'confidence'));
+        $this->assertContains(null, array_column($index->unresolvedReferences(), 'target'), true);
     }
 }

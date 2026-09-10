@@ -4,6 +4,13 @@ namespace Peralta\AgentKit\Tests\Unit\Refactoring;
 
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\Confidence;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyEdge;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyGraph;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyNode;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyType;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndex;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
@@ -25,7 +32,33 @@ final class CallerAnalyzerTest extends TestCase
         $this->assertSame(['Fixtures\\Checkout\\CheckoutService'], array_values(array_unique(array_column($result->directCallers, 'source'))));
         $this->assertContains('constructor_injection', array_column($result->structuralDependencies, 'type'));
         $this->assertNotContains('status', array_column($result->directCallers, 'target_method'));
+        $this->assertIsArray($result->transitiveDependents);
+        $this->assertIsArray($result->unresolved);
+        $this->assertArrayHasKey('transitive_dependents', $result->toArray());
+        $this->assertArrayHasKey('unresolved', $result->toArray());
         $this->assertSame($result->toArray(), json_decode(json_encode($result->toArray()), true));
+    }
+
+    public function test_it_returns_only_non_direct_non_structural_transitive_dependents(): void
+    {
+        $graph = new DependencyGraph();
+        foreach (['Target', 'Direct', 'Structural', 'Transitive'] as $name) {
+            $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
+        }
+        $graph->addEdge($this->edge('Direct', 'Target', DependencyType::METHOD_CALL));
+        $graph->addEdge($this->edge('Structural', 'Target', DependencyType::PROPERTY_TYPE));
+        $graph->addEdge($this->edge('Transitive', 'Direct', DependencyType::CONSTRUCTOR_INJECTION));
+        $graph->addEdge($this->edge('Target', 'Transitive', DependencyType::METHOD_PARAMETER));
+
+        $symbols = [];
+        foreach (['Target', 'Direct', 'Structural', 'Transitive'] as $name) {
+            $symbols[$name] = new SymbolDefinition($name, 'class', "{$name}.php", 1);
+        }
+
+        $result = (new CallerAnalyzer())->findCallers(new CodebaseIndex($symbols, $graph), 'Target');
+
+        $this->assertSame(['Transitive'], array_column($result->transitiveDependents, 'fqcn'));
+        $this->assertNotContains('Target', array_column($result->transitiveDependents, 'fqcn'));
     }
 
     public function test_it_normalizes_target_and_supports_unfiltered_calls(): void
@@ -66,5 +99,10 @@ final class CallerAnalyzerTest extends TestCase
             new ProjectScanner(new PhpFileAnalyzer()),
             new PhpAstParser(),
         ))->build($root);
+    }
+
+    private function edge(string $source, string $target, DependencyType $type): DependencyEdge
+    {
+        return new DependencyEdge($source, 'run', $target, 'go', $type, Confidence::EXACT, "{$source}.php", 5);
     }
 }

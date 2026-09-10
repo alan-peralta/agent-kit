@@ -6,6 +6,7 @@ final readonly class ImpactResult
 {
     public function __construct(
         public string $target,
+        public ?string $method,
         public int $directCallers,
         public int $structuralDependencies,
         public int $transitiveDependents,
@@ -21,6 +22,7 @@ final readonly class ImpactResult
     {
         return [
             'target' => $this->target,
+            'method' => $this->method,
             'direct_callers' => $this->directCallers,
             'structural_dependencies' => $this->structuralDependencies,
             'transitive_dependents' => $this->transitiveDependents,

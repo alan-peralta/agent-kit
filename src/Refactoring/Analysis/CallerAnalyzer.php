@@ -39,12 +39,22 @@ final class CallerAnalyzer
                 fn ($edge) => in_array($edge->type, self::STRUCTURAL_TYPES, true),
             )),
         );
+        $directDependents = array_fill_keys(array_column($direct, 'source'), true);
+        foreach (array_column($structural, 'source') as $source) {
+            $directDependents[$source] = true;
+        }
+        $transitive = array_values(array_filter(
+            $index->graph()->transitiveDependents($target),
+            fn (array $dependent) => !isset($directDependents[$dependent['fqcn']]),
+        ));
 
         return new CallerResult(
             $target,
             $method,
             $direct,
             $structural,
+            $transitive,
+            $index->unresolvedReferences(),
             $index->diagnostics(),
         );
     }

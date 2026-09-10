@@ -42,6 +42,45 @@ final class ImpactAnalyzerTest extends TestCase
         $this->assertNotContains('Target', array_column($result->transitive, 'fqcn'));
     }
 
+    public function test_it_scopes_direct_impact_to_a_method(): void
+    {
+        $graph = new DependencyGraph();
+        foreach (['Target', 'ChargeCaller', 'StatusCaller'] as $name) {
+            $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
+        }
+        $graph->addEdge(new DependencyEdge(
+            'ChargeCaller',
+            'run',
+            'Target',
+            'charge',
+            DependencyType::METHOD_CALL,
+            Confidence::EXACT,
+            'ChargeCaller.php',
+            5,
+        ));
+        $graph->addEdge(new DependencyEdge(
+            'StatusCaller',
+            'run',
+            'Target',
+            'status',
+            DependencyType::METHOD_CALL,
+            Confidence::EXACT,
+            'StatusCaller.php',
+            5,
+        ));
+
+        $result = (new ImpactAnalyzer())->analyze(
+            $this->index($graph, ['Target', 'ChargeCaller', 'StatusCaller']),
+            'Target',
+            'charge',
+        );
+
+        $this->assertSame('charge', $result->method);
+        $this->assertSame(1, $result->directCallers);
+        $this->assertSame(['ChargeCaller'], array_column($result->direct, 'source'));
+        $this->assertSame('charge', $result->toArray()['method']);
+    }
+
     #[DataProvider('riskCases')]
     public function test_it_applies_configured_risk_boundaries(int $dependents, string $expected): void
     {

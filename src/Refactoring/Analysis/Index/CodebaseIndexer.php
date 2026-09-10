@@ -21,6 +21,7 @@ final class CodebaseIndexer
         $symbols = [];
         $diagnostics = [];
         $references = [];
+        $unresolved = [];
         $graph = new DependencyGraph();
 
         foreach ($this->scanner->phpFiles($root) as $file) {
@@ -42,6 +43,7 @@ final class CodebaseIndexer
 
         foreach ($references as $reference) {
             if ($reference->target === null) {
+                $unresolved[] = $reference;
                 continue;
             }
             $graph->addEdge(new DependencyEdge(
@@ -59,6 +61,6 @@ final class CodebaseIndexer
 
         ksort($symbols, SORT_STRING);
 
-        return new CodebaseIndex($symbols, $graph, $diagnostics);
+        return new CodebaseIndex($symbols, $graph, $diagnostics, $unresolved);
     }
 }

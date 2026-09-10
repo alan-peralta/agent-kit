@@ -15,6 +15,7 @@ final readonly class CodebaseIndex
         private array $symbols,
         private DependencyGraph $dependencyGraph,
         private array $parseDiagnostics = [],
+        private array $unresolved = [],
     ) {
         $methods = [];
         $files = [];
@@ -75,6 +76,11 @@ final readonly class CodebaseIndex
     public function diagnostics(): array
     {
         return $this->parseDiagnostics;
+    }
+
+    public function unresolvedReferences(): array
+    {
+        return array_map(fn ($reference) => $reference->toArray(), $this->unresolved);
     }
 
     private function normalize(string $fqcn): string

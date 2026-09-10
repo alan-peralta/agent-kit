@@ -9,17 +9,13 @@ final class ImpactAnalyzer
 {
     public function __construct(private readonly array $thresholds = []) {}
 
-    public function analyze(CodebaseIndex $index, string $class): ImpactResult
+    public function analyze(CodebaseIndex $index, string $class, ?string $method = null): ImpactResult
     {
-        $callers = (new CallerAnalyzer())->findCallers($index, $class);
+        $callers = (new CallerAnalyzer())->findCallers($index, $class, $method);
         $directSources = $this->uniqueValues($callers->directCallers, 'source');
         $structuralSources = $this->uniqueValues($callers->structuralDependencies, 'source');
         $directDependents = array_fill_keys(array_merge($directSources, $structuralSources), true);
-
-        $transitive = array_values(array_filter(
-            $index->graph()->transitiveDependents($callers->target),
-            fn (array $dependent) => !isset($directDependents[$dependent['fqcn']]),
-        ));
+        $transitive = $callers->transitiveDependents;
 
         $allDependents = $directDependents;
         foreach ($transitive as $dependent) {
@@ -36,6 +32,7 @@ final class ImpactAnalyzer
 
         return new ImpactResult(
             $callers->target,
+            $callers->method,
             count($directSources),
             count($structuralSources),
             count($transitive),

@@ -9,6 +9,8 @@ final readonly class CallerResult
         public ?string $method,
         public array $directCallers,
         public array $structuralDependencies,
+        public array $transitiveDependents,
+        public array $unresolved,
         public array $diagnostics,
     ) {}
 
@@ -19,6 +21,8 @@ final readonly class CallerResult
             'method' => $this->method,
             'direct_callers' => $this->directCallers,
             'structural_dependencies' => $this->structuralDependencies,
+            'transitive_dependents' => $this->transitiveDependents,
+            'unresolved' => $this->unresolved,
             'diagnostics' => array_map(fn ($diagnostic) => $diagnostic->toArray(), $this->diagnostics),
         ];
     }
