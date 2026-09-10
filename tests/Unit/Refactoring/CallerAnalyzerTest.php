@@ -61,8 +61,46 @@ final class CallerAnalyzerTest extends TestCase
 
         $this->assertSame(['ChargeCaller'], array_column($result->directCallers, 'source'));
         $this->assertSame(['ChargeParent'], array_column($result->transitiveDependents, 'fqcn'));
+        $this->assertSame(2, $result->transitiveDependents[0]['depth']);
+        $this->assertSame(
+            ['ChargeParent', 'ChargeCaller', 'Target'],
+            $result->transitiveDependents[0]['path'],
+        );
         $this->assertNotContains('StatusCaller', array_column($result->transitiveDependents, 'fqcn'));
         $this->assertNotContains('StatusParent', array_column($result->transitiveDependents, 'fqcn'));
+    }
+
+    public function test_method_scope_keeps_a_valid_longer_path_when_a_shorter_path_crosses_the_target(): void
+    {
+        $graph = new DependencyGraph();
+        $names = ['Target', 'ChargeCaller', 'Legit1', 'Legit2', 'Shared'];
+        foreach ($names as $name) {
+            $graph->addNode(new DependencyNode($name, 'class', "{$name}.php", 1));
+        }
+        $graph->addEdge($this->edge('ChargeCaller', 'Target', DependencyType::METHOD_CALL, 'charge'));
+        $graph->addEdge($this->edge('Legit1', 'ChargeCaller', DependencyType::CONSTRUCTOR_INJECTION));
+        $graph->addEdge($this->edge('Legit2', 'Legit1', DependencyType::CONSTRUCTOR_INJECTION));
+        $graph->addEdge($this->edge('Shared', 'Legit2', DependencyType::CONSTRUCTOR_INJECTION));
+        $graph->addEdge($this->edge('Target', 'ChargeCaller', DependencyType::METHOD_PARAMETER));
+        $graph->addEdge($this->edge('Shared', 'Target', DependencyType::METHOD_CALL, 'status'));
+
+        $symbols = [];
+        foreach ($names as $name) {
+            $symbols[$name] = new SymbolDefinition($name, 'class', "{$name}.php", 1);
+        }
+
+        $result = (new CallerAnalyzer())->findCallers(new CodebaseIndex($symbols, $graph), 'Target', 'charge');
+
+        $this->assertSame(['Legit1', 'Legit2', 'Shared'], array_column($result->transitiveDependents, 'fqcn'));
+        $shared = $result->transitiveDependents[2];
+        $this->assertSame(4, $shared['depth']);
+        $this->assertSame(['Shared', 'Legit2', 'Legit1', 'ChargeCaller', 'Target'], $shared['path']);
+
+        foreach ($result->transitiveDependents as $dependent) {
+            $pathBeforeTarget = $dependent['path'];
+            $this->assertSame('Target', array_pop($pathBeforeTarget));
+            $this->assertNotContains('Target', $pathBeforeTarget);
+        }
     }
 
     public function test_it_returns_only_non_direct_non_structural_transitive_dependents(): void

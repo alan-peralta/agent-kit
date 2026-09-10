@@ -67,28 +67,41 @@ final class CallerAnalyzer
         array $firstHopDependents,
     ): array
     {
-        $transitive = [];
+        $roots = array_values(array_unique(array_map(
+            fn (string $root) => ltrim($root, '\\'),
+            array_keys($firstHopDependents),
+        )));
+        sort($roots, SORT_STRING);
 
-        foreach (array_keys($firstHopDependents) as $root) {
-            foreach ($index->graph()->transitiveDependents($root) as $dependent) {
-                if (
-                    $dependent['fqcn'] === $target
-                    || isset($firstHopDependents[$dependent['fqcn']])
-                    || in_array($target, $dependent['path'], true)
-                ) {
+        $visited = [$target => true];
+        $queue = [];
+        foreach ($roots as $root) {
+            $visited[$root] = true;
+            $queue[] = [$root, [$root, $target]];
+        }
+
+        $transitive = [];
+        $position = 0;
+        while (isset($queue[$position])) {
+            [$current, $path] = $queue[$position++];
+            foreach ($index->graph()->incoming($current) as $edge) {
+                $source = ltrim($edge->source, '\\');
+                if (isset($visited[$source])) {
                     continue;
                 }
 
-                $dependent['depth']++;
-                $dependent['path'][] = $target;
-                if (! isset($transitive[$dependent['fqcn']])
-                    || $dependent['depth'] < $transitive[$dependent['fqcn']]['depth']) {
-                    $transitive[$dependent['fqcn']] = $dependent;
-                }
+                $visited[$source] = true;
+                $sourcePath = array_merge([$source], $path);
+                $transitive[] = [
+                    'fqcn' => $source,
+                    'file' => $edge->file,
+                    'depth' => count($sourcePath) - 1,
+                    'path' => $sourcePath,
+                ];
+                $queue[] = [$source, $sourcePath];
             }
         }
 
-        $transitive = array_values($transitive);
         usort($transitive, fn (array $a, array $b) => [$a['depth'], $a['fqcn']] <=> [$b['depth'], $b['fqcn']]);
 
         return $transitive;
