@@ -37,7 +37,7 @@ final class ImpactAnalyzer
             count($structuralSources),
             count($transitive),
             count($files),
-            $this->risk(count($allDependents)),
+            $this->riskForDependents(count($allDependents)),
             $callers->directCallers,
             $callers->structuralDependencies,
             $transitive,
@@ -50,7 +50,7 @@ final class ImpactAnalyzer
         return array_values(array_unique(array_column($rows, $key)));
     }
 
-    private function risk(int $dependents): string
+    public function riskForDependents(int $dependents): string
     {
         if ($dependents <= (int) ($this->thresholds['low_max'] ?? 2)) {
             return 'LOW';

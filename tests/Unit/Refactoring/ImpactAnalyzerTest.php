@@ -15,6 +15,20 @@ use PHPUnit\Framework\TestCase;
 
 final class ImpactAnalyzerTest extends TestCase
 {
+    public function test_it_exposes_the_configured_risk_policy_for_aggregated_dependents(): void
+    {
+        $analyzer = new ImpactAnalyzer([
+            'low_max' => 1,
+            'medium_max' => 3,
+            'high_max' => 5,
+        ]);
+
+        $this->assertSame('LOW', $analyzer->riskForDependents(1));
+        $this->assertSame('MEDIUM', $analyzer->riskForDependents(3));
+        $this->assertSame('HIGH', $analyzer->riskForDependents(5));
+        $this->assertSame('CRITICAL', $analyzer->riskForDependents(6));
+    }
+
     public function test_it_counts_unique_direct_structural_and_transitive_dependents_in_a_cycle(): void
     {
         $graph = new DependencyGraph();

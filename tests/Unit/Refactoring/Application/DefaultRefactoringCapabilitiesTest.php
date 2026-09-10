@@ -254,7 +254,10 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         try {
             $this->assertTrue(mkdir($root, 0777, true));
             $this->assertNotFalse(file_put_contents($outside, "<?php\nclass Outside {}\n"));
-            $this->assertTrue(symlink($outside, $link));
+            if (!function_exists('symlink') || !@symlink($outside, $link)) {
+                $this->markTestSkipped('Symbolic links are not available in this environment.');
+            }
+            $this->assertTrue(is_link($link));
 
             foreach ([$outside, '../Outside.php', 'Linked.php'] as $target) {
                 try {
@@ -315,11 +318,11 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
 
             try {
                 $this->service()->analyze($root, 'Standalone.php::helper');
-                $this->fail('Expected an ambiguous target error.');
+                $this->fail('Expected an unsupported target error.');
             } catch (CapabilityException $exception) {
-                $this->assertSame('AMBIGUOUS_TARGET', $exception->errorCode);
+                $this->assertSame('UNSUPPORTED_TARGET', $exception->errorCode);
                 $this->assertSame(
-                    'File method target is ambiguous; use a fully qualified class name.',
+                    'A method target requires a class declaration.',
                     $exception->getMessage(),
                 );
             }
@@ -331,6 +334,61 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
                 rmdir($root);
             }
         }
+    }
+
+    public function test_file_risk_uses_the_union_of_unique_dependents_across_symbols(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-union-risk-' . bin2hex(random_bytes(6));
+        $symbols = $root . '/Symbols.php';
+        $callers = $root . '/Callers.php';
+
+        try {
+            $this->assertTrue(mkdir($root, 0777, true));
+            $this->assertNotFalse(file_put_contents($symbols, <<<'PHP'
+<?php
+namespace RiskFixture;
+class Alpha { public static function run(): void {} }
+class Beta { public static function run(): void {} }
+class Gamma { public static function run(): void {} }
+PHP));
+            $this->assertNotFalse(file_put_contents($callers, <<<'PHP'
+<?php
+namespace RiskFixture;
+class AlphaCaller { public function call(): void { Alpha::run(); } }
+class BetaCaller { public function call(): void { Beta::run(); } }
+class GammaCaller { public function call(): void { Gamma::run(); } }
+PHP));
+
+            $service = $this->service();
+            $this->assertSame('LOW', $service->analyze($root, 'RiskFixture\\Alpha')->data['risk']);
+            $this->assertSame('LOW', $service->analyze($root, 'RiskFixture\\Beta')->data['risk']);
+            $this->assertSame('LOW', $service->analyze($root, 'RiskFixture\\Gamma')->data['risk']);
+
+            $fileResult = $service->analyze($root, 'Symbols.php');
+
+            $this->assertCount(3, $fileResult->data['direct_callers']);
+            $this->assertSame('MEDIUM', $fileResult->data['risk']);
+        } finally {
+            if (is_file($callers)) {
+                unlink($callers);
+            }
+            if (is_file($symbols)) {
+                unlink($symbols);
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+        }
+    }
+
+    public function test_it_preserves_a_filesystem_root_during_normalization(): void
+    {
+        $method = new \ReflectionMethod(DefaultRefactoringCapabilities::class, 'projectRoot');
+
+        $this->assertSame(
+            realpath(DIRECTORY_SEPARATOR),
+            $method->invoke($this->service(), DIRECTORY_SEPARATOR),
+        );
     }
 
     public function test_it_finds_callers_and_moves_partial_data_to_the_envelope(): void

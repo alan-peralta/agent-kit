@@ -76,7 +76,13 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         $index = $this->indexer->build($root);
         [$file, $displayPath, $symbols, $isFileTarget] = $this->analysisTarget($root, $requested, $index);
 
-        if ($isFileTarget && $requested->method !== null && count($symbols) !== 1) {
+        if ($isFileTarget && $requested->method !== null && $symbols === []) {
+            throw new CapabilityException(
+                'UNSUPPORTED_TARGET',
+                'A method target requires a class declaration.',
+            );
+        }
+        if ($isFileTarget && $requested->method !== null && count($symbols) > 1) {
             throw new CapabilityException(
                 'AMBIGUOUS_TARGET',
                 'File method target is ambiguous; use a fully qualified class name.',
@@ -99,7 +105,6 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             'risk' => 'UNKNOWN',
         ];
 
-        $risks = [];
         foreach ($symbols as $symbol) {
             $impact = $this->impactAnalyzer->analyze($index, $symbol->fqcn, $method);
             $data['upstream_dependencies'] = array_merge(
@@ -112,7 +117,6 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
                 $impact->structural,
             );
             $data['transitive_impact'] = array_merge($data['transitive_impact'], $impact->transitive);
-            $risks[] = $impact->risk;
         }
 
         if ($symbols !== []) {
@@ -120,7 +124,12 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             $data['direct_callers'] = $this->uniqueEdges($data['direct_callers']);
             $data['structural_dependencies'] = $this->uniqueEdges($data['structural_dependencies']);
             $data['transitive_impact'] = $this->uniqueTransitive($data['transitive_impact']);
-            $data['risk'] = $this->highestRisk($risks);
+            $dependents = array_unique(array_merge(
+                array_column($data['direct_callers'], 'source'),
+                array_column($data['structural_dependencies'], 'source'),
+                array_column($data['transitive_impact'], 'fqcn'),
+            ));
+            $data['risk'] = $this->impactAnalyzer->riskForDependents(count($dependents));
         }
 
         return new CapabilityResult(
@@ -201,7 +210,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             );
         }
 
-        return rtrim($root, DIRECTORY_SEPARATOR);
+        return dirname($root) === $root ? $root : rtrim($root, DIRECTORY_SEPARATOR);
     }
 
     private function target(string $target): RefactoringTarget
@@ -360,13 +369,5 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         ksort($unique, SORT_STRING);
 
         return array_values($unique);
-    }
-
-    private function highestRisk(array $risks): string
-    {
-        $levels = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2, 'CRITICAL' => 3];
-        usort($risks, static fn (string $a, string $b): int => $levels[$b] <=> $levels[$a]);
-
-        return $risks[0];
     }
 }
