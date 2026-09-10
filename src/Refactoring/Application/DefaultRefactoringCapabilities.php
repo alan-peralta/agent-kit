@@ -74,22 +74,23 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         $root = $this->projectRoot($projectRoot);
         $requested = $this->target($target);
         $index = $this->indexer->build($root);
-        [$file, $displayPath, $symbol] = $this->analysisTarget($root, $requested, $index);
+        [$file, $displayPath, $symbols, $isFileTarget] = $this->analysisTarget($root, $requested, $index);
 
-        if ($requested->method !== null && $symbol === null) {
+        if ($isFileTarget && $requested->method !== null && count($symbols) !== 1) {
             throw new CapabilityException(
-                'UNSUPPORTED_TARGET',
-                'A method target requires a class declaration.',
+                'AMBIGUOUS_TARGET',
+                'File method target is ambiguous; use a fully qualified class name.',
             );
         }
-        if ($symbol !== null && $requested->method !== null) {
-            $this->requireMethod($index, $symbol->fqcn, $requested->method);
-        }
+
+        $method = $requested->method === null
+            ? null
+            : $this->canonicalMethod($index, $symbols[0]->fqcn, $requested->method);
 
         $metrics = $this->fileAnalyzer->analyze($file, $displayPath)->toArray();
         $data = [
-            'target' => $symbol?->fqcn ?? $requested->value,
-            'method' => $requested->method,
+            'target' => $isFileTarget ? $displayPath : $symbols[0]->fqcn,
+            'method' => $method,
             'metrics' => $metrics,
             'upstream_dependencies' => [],
             'direct_callers' => [],
@@ -98,14 +99,28 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             'risk' => 'UNKNOWN',
         ];
 
-        if ($symbol !== null) {
-            $callerResult = $this->callers->findCallers($index, $symbol->fqcn, $requested->method);
-            $impact = $this->impactAnalyzer->analyze($index, $symbol->fqcn, $requested->method);
-            $data['upstream_dependencies'] = $this->edges($index->findDependencies($symbol->fqcn));
-            $data['direct_callers'] = $callerResult->directCallers;
-            $data['structural_dependencies'] = $callerResult->structuralDependencies;
-            $data['transitive_impact'] = $impact->transitive;
-            $data['risk'] = $impact->risk;
+        $risks = [];
+        foreach ($symbols as $symbol) {
+            $impact = $this->impactAnalyzer->analyze($index, $symbol->fqcn, $method);
+            $data['upstream_dependencies'] = array_merge(
+                $data['upstream_dependencies'],
+                $this->edges($index->findDependencies($symbol->fqcn)),
+            );
+            $data['direct_callers'] = array_merge($data['direct_callers'], $impact->direct);
+            $data['structural_dependencies'] = array_merge(
+                $data['structural_dependencies'],
+                $impact->structural,
+            );
+            $data['transitive_impact'] = array_merge($data['transitive_impact'], $impact->transitive);
+            $risks[] = $impact->risk;
+        }
+
+        if ($symbols !== []) {
+            $data['upstream_dependencies'] = $this->uniqueEdges($data['upstream_dependencies']);
+            $data['direct_callers'] = $this->uniqueEdges($data['direct_callers']);
+            $data['structural_dependencies'] = $this->uniqueEdges($data['structural_dependencies']);
+            $data['transitive_impact'] = $this->uniqueTransitive($data['transitive_impact']);
+            $data['risk'] = $this->highestRisk($risks);
         }
 
         return new CapabilityResult(
@@ -121,8 +136,9 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         $root = $this->projectRoot($projectRoot);
         $requested = $this->target($target);
         $index = $this->indexer->build($root);
-        $this->requireClassAndMethod($index, $requested);
-        $result = $this->callers->findCallers($index, $requested->value, $requested->method);
+        $symbol = $this->requireClass($index, $requested->value);
+        $method = $this->canonicalMethod($index, $symbol->fqcn, $requested->method);
+        $result = $this->callers->findCallers($index, $symbol->fqcn, $method);
         $data = $result->toArray();
         unset($data['diagnostics'], $data['unresolved']);
 
@@ -146,7 +162,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         }
 
         $index = $this->indexer->build($root);
-        $this->requireClassAndMethod($index, $requested);
+        $this->requireClass($index, $requested->value);
 
         return new CapabilityResult('dependencies', [
             'target' => $requested->value,
@@ -161,8 +177,9 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         $root = $this->projectRoot($projectRoot);
         $requested = $this->target($target);
         $index = $this->indexer->build($root);
-        $this->requireClassAndMethod($index, $requested);
-        $result = $this->impactAnalyzer->analyze($index, $requested->value, $requested->method);
+        $symbol = $this->requireClass($index, $requested->value);
+        $method = $this->canonicalMethod($index, $symbol->fqcn, $requested->method);
+        $result = $this->impactAnalyzer->analyze($index, $symbol->fqcn, $method);
         $data = $result->toArray();
         unset($data['diagnostics']);
 
@@ -196,7 +213,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         }
     }
 
-    /** @return array{string, string, SymbolDefinition|null} */
+    /** @return array{string, string, list<SymbolDefinition>, bool} */
     private function analysisTarget(
         string $root,
         RefactoringTarget $target,
@@ -207,7 +224,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             $relative = $this->relativePath($root, $file);
             $classes = $index->classesInFile($relative);
 
-            return [$file, $relative, $classes[0] ?? null];
+            return [$file, $relative, $classes, true];
         }
 
         if ($this->looksLikeFile($target->value)) {
@@ -226,7 +243,9 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             );
         }
 
-        return [$file, str_replace('\\', '/', $symbol->file), $symbol];
+        $this->ensureInsideProject($root, (string) realpath($file));
+
+        return [$file, str_replace('\\', '/', $symbol->file), [$symbol], false];
     }
 
     private function resolvePhpFile(string $root, string $target): ?string
@@ -239,6 +258,10 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             ? $target
             : $root . DIRECTORY_SEPARATOR . $target;
         $file = realpath($candidate);
+
+        if ($file !== false && is_file($file)) {
+            $this->ensureInsideProject($root, $file);
+        }
 
         return $file !== false && is_file($file) && strtolower(pathinfo($file, PATHINFO_EXTENSION)) === 'php'
             ? $file
@@ -265,14 +288,14 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             : str_replace('\\', '/', $file);
     }
 
-    private function requireClassAndMethod(CodebaseIndex $index, RefactoringTarget $target): SymbolDefinition
+    private function ensureInsideProject(string $root, string $path): void
     {
-        $symbol = $this->requireClass($index, $target->value);
-        if ($target->method !== null) {
-            $this->requireMethod($index, $symbol->fqcn, $target->method);
+        if ($path !== $root && !str_starts_with($path, $root . DIRECTORY_SEPARATOR)) {
+            throw new CapabilityException(
+                'TARGET_OUTSIDE_PROJECT',
+                'Target file must be inside the project root.',
+            );
         }
-
-        return $symbol;
     }
 
     private function requireClass(CodebaseIndex $index, string $class): SymbolDefinition
@@ -285,18 +308,65 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         return $symbol;
     }
 
-    private function requireMethod(CodebaseIndex $index, string $class, string $method): void
+    private function canonicalMethod(CodebaseIndex $index, string $class, ?string $method): ?string
     {
-        if ($index->findMethod($class, $method) === null) {
+        if ($method === null) {
+            return null;
+        }
+
+        $definition = $index->findMethod($class, $method);
+        if ($definition === null) {
             throw new CapabilityException(
                 'TARGET_NOT_FOUND',
                 "Method not found: {$class}::{$method}",
             );
         }
+
+        return $definition['name'];
     }
 
     private function edges(array $edges): array
     {
         return array_map(static fn ($edge): array => $edge->toArray(), $edges);
+    }
+
+    private function uniqueEdges(array $edges): array
+    {
+        return $this->uniqueRows($edges, static fn (array $edge): string => implode("\0", [
+            $edge['source'],
+            $edge['source_method'] ?? '',
+            $edge['target'],
+            $edge['target_method'] ?? '',
+            $edge['type'],
+            $edge['file'],
+            (string) $edge['line'],
+        ]));
+    }
+
+    private function uniqueTransitive(array $dependents): array
+    {
+        return $this->uniqueRows($dependents, static fn (array $dependent): string => implode("\0", [
+            $dependent['fqcn'],
+            implode('>', $dependent['path']),
+        ]));
+    }
+
+    private function uniqueRows(array $rows, callable $identity): array
+    {
+        $unique = [];
+        foreach ($rows as $row) {
+            $unique[$identity($row)] = $row;
+        }
+        ksort($unique, SORT_STRING);
+
+        return array_values($unique);
+    }
+
+    private function highestRisk(array $risks): string
+    {
+        $levels = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2, 'CRITICAL' => 3];
+        usort($risks, static fn (string $a, string $b): int => $levels[$b] <=> $levels[$a]);
+
+        return $risks[0];
     }
 }

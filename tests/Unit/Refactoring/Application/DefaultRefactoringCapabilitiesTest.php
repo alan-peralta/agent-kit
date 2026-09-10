@@ -120,11 +120,12 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
     {
         $result = $this->service()->analyze($this->root, 'CheckoutService.php');
 
-        $this->assertSame('Fixtures\\Checkout\\CheckoutService', $result->data['target']);
+        $this->assertSame('CheckoutService.php', $result->data['target']);
         $this->assertSame('CheckoutService.php', $result->data['metrics']['path']);
         $this->assertSame(36, $result->data['metrics']['lines']);
         $this->assertSame(2, $result->data['metrics']['methods']);
         $this->assertSame(6, $result->data['metrics']['dependencies']);
+        $this->assertNotEmpty($result->data['upstream_dependencies']);
     }
 
     public function test_it_analyzes_an_absolute_php_file_path(): void
@@ -133,7 +134,7 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
 
         $result = $this->service()->analyze($this->root, $file);
 
-        $this->assertSame('Fixtures\\Checkout\\CheckoutService', $result->data['target']);
+        $this->assertSame('CheckoutService.php', $result->data['target']);
         $this->assertSame('CheckoutService.php', $result->data['metrics']['path']);
         $this->assertSame(36, $result->data['metrics']['lines']);
     }
@@ -151,13 +152,147 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         $this->assertNotSame('UNKNOWN', $result->data['risk']);
     }
 
+    public function test_it_canonicalizes_mixed_case_method_targets_for_every_analysis(): void
+    {
+        $lowerCallers = $this->service()->findCallers(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::charge',
+        );
+        $mixedCallers = $this->service()->findCallers(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::Charge',
+        );
+        $lowerImpact = $this->service()->impact(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::charge',
+        );
+        $mixedImpact = $this->service()->impact(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::Charge',
+        );
+        $lowerAnalyze = $this->service()->analyze(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::charge',
+        );
+        $mixedAnalyze = $this->service()->analyze(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::Charge',
+        );
+
+        $this->assertSame('charge', $mixedCallers->data['method']);
+        $this->assertSame(
+            count($lowerCallers->data['direct_callers']),
+            count($mixedCallers->data['direct_callers']),
+        );
+        $this->assertSame('charge', $mixedImpact->data['method']);
+        $this->assertSame($lowerImpact->data['direct_callers'], $mixedImpact->data['direct_callers']);
+        $this->assertSame('charge', $mixedAnalyze->data['method']);
+        $this->assertSame(
+            count($lowerAnalyze->data['direct_callers']),
+            count($mixedAnalyze->data['direct_callers']),
+        );
+    }
+
+    public function test_it_aggregates_relationships_for_every_symbol_in_a_file(): void
+    {
+        $result = $this->service(
+            impactAnalyzer: new ImpactAnalyzer([
+                'low_max' => 0,
+                'medium_max' => 1,
+                'high_max' => 2,
+            ]),
+        )->analyze($this->root, 'StructuralTypes.php');
+
+        $this->assertSame('StructuralTypes.php', $result->data['target']);
+        $this->assertCount(8, $result->data['upstream_dependencies']);
+        $this->assertCount(1, $result->data['direct_callers']);
+        $this->assertCount(6, $result->data['structural_dependencies']);
+        $this->assertSame([], $result->data['transitive_impact']);
+        $this->assertContains(
+            'Fixtures\\Payments\\ExtendedPaymentService',
+            array_column($result->data['upstream_dependencies'], 'source'),
+        );
+        $this->assertContains(
+            'Fixtures\\Payments\\ExtendedPaymentService',
+            array_column($result->data['direct_callers'], 'source'),
+        );
+        $this->assertContains(
+            'Fixtures\\Payments\\BasePaymentService',
+            array_column($result->data['structural_dependencies'], 'target'),
+        );
+        foreach (['upstream_dependencies', 'direct_callers', 'structural_dependencies'] as $key) {
+            $identities = array_map($this->edgeIdentity(...), $result->data[$key]);
+            $sorted = $identities;
+            sort($sorted, SORT_STRING);
+            $this->assertSame($sorted, $identities);
+            $this->assertCount(count($identities), array_unique($identities));
+        }
+        $this->assertSame('MEDIUM', $result->data['risk']);
+    }
+
+    public function test_it_rejects_a_method_on_a_multi_symbol_file_as_ambiguous(): void
+    {
+        try {
+            $this->service()->analyze($this->root, 'StructuralTypes.php::compare');
+            $this->fail('Expected an ambiguous target error.');
+        } catch (CapabilityException $exception) {
+            $this->assertSame('AMBIGUOUS_TARGET', $exception->errorCode);
+            $this->assertSame(
+                'File method target is ambiguous; use a fully qualified class name.',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    public function test_it_rejects_absolute_relative_and_symlink_paths_outside_the_project(): void
+    {
+        $parent = sys_get_temp_dir() . '/agent-kit-containment-' . bin2hex(random_bytes(6));
+        $root = $parent . '/project';
+        $outside = $parent . '/Outside.php';
+        $link = $root . '/Linked.php';
+
+        try {
+            $this->assertTrue(mkdir($root, 0777, true));
+            $this->assertNotFalse(file_put_contents($outside, "<?php\nclass Outside {}\n"));
+            $this->assertTrue(symlink($outside, $link));
+
+            foreach ([$outside, '../Outside.php', 'Linked.php'] as $target) {
+                try {
+                    $this->service()->analyze($root, $target);
+                    $this->fail("Expected outside-project rejection for {$target}.");
+                } catch (CapabilityException $exception) {
+                    $this->assertSame('TARGET_OUTSIDE_PROJECT', $exception->errorCode);
+                    $this->assertSame(
+                        'Target file must be inside the project root.',
+                        $exception->getMessage(),
+                    );
+                }
+            }
+        } finally {
+            if (is_link($link)) {
+                unlink($link);
+            }
+            if (is_file($outside)) {
+                unlink($outside);
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+            if (is_dir($parent)) {
+                rmdir($parent);
+            }
+        }
+    }
+
     public function test_it_analyzes_a_classless_php_file_with_stable_empty_relationships(): void
     {
         $root = sys_get_temp_dir() . '/agent-kit-classless-' . bin2hex(random_bytes(6));
-        mkdir($root, 0777, true);
-        file_put_contents($root . '/Standalone.php', "<?php\n\nfunction helper(): void {}\n");
+        $file = $root . '/Standalone.php';
 
         try {
+            $this->assertTrue(mkdir($root, 0777, true));
+            $this->assertNotFalse(file_put_contents($file, "<?php\n\nfunction helper(): void {}\n"));
+
             $result = $this->service()->analyze($root, 'Standalone.php');
 
             $this->assertSame([
@@ -177,9 +312,24 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
                 'transitive_impact' => [],
                 'risk' => 'UNKNOWN',
             ], $result->data);
+
+            try {
+                $this->service()->analyze($root, 'Standalone.php::helper');
+                $this->fail('Expected an ambiguous target error.');
+            } catch (CapabilityException $exception) {
+                $this->assertSame('AMBIGUOUS_TARGET', $exception->errorCode);
+                $this->assertSame(
+                    'File method target is ambiguous; use a fully qualified class name.',
+                    $exception->getMessage(),
+                );
+            }
         } finally {
-            unlink($root . '/Standalone.php');
-            rmdir($root);
+            if (is_file($file)) {
+                unlink($file);
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
         }
     }
 
@@ -288,7 +438,23 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         };
     }
 
-    private function service(?AstParser $parser = null): DefaultRefactoringCapabilities
+    private function edgeIdentity(array $edge): string
+    {
+        return implode("\0", [
+            $edge['source'],
+            $edge['source_method'] ?? '',
+            $edge['target'],
+            $edge['target_method'] ?? '',
+            $edge['type'],
+            $edge['file'],
+            (string) $edge['line'],
+        ]);
+    }
+
+    private function service(
+        ?AstParser $parser = null,
+        ?ImpactAnalyzer $impactAnalyzer = null,
+    ): DefaultRefactoringCapabilities
     {
         $fileAnalyzer = new PhpFileAnalyzer();
         $scanner = new ProjectScanner($fileAnalyzer);
@@ -299,7 +465,7 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
             new RefactoringReport(),
             new CodebaseIndexer($scanner, $parser ?? new PhpAstParser()),
             new CallerAnalyzer(),
-            new ImpactAnalyzer(),
+            $impactAnalyzer ?? new ImpactAnalyzer(),
         );
     }
 }
