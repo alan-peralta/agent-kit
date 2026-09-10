@@ -30,21 +30,46 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         $result = $this->service()->describeCapabilities();
 
         $this->assertSame('capability_discovery', $result->capability);
-        $this->assertSame(
-            ['audit', 'analyze', 'find_callers', 'dependencies', 'impact'],
-            array_column($result->data['capabilities'], 'name'),
-        );
-        foreach ($result->data['capabilities'] as $descriptor) {
-            $this->assertNotEmpty($descriptor['targets']);
-            $this->assertStringStartsWith('php artisan agent-kit:', $descriptor['cli_fallback']);
-            $this->assertStringContainsString('--json', $descriptor['cli_fallback']);
-            $this->assertTrue($descriptor['json']);
-        }
+        $this->assertSame([
+            [
+                'name' => 'audit',
+                'targets' => ['project'],
+                'cli_fallback' => 'php artisan agent-kit:refactor-audit --json',
+                'json' => true,
+            ],
+            [
+                'name' => 'analyze',
+                'targets' => ['file', 'class', 'method'],
+                'cli_fallback' => 'php artisan agent-kit:refactor-analyze <target> --json',
+                'json' => true,
+            ],
+            [
+                'name' => 'find_callers',
+                'targets' => ['class', 'method'],
+                'cli_fallback' => 'php artisan agent-kit:refactor-callers <class> --method=<method> --json',
+                'json' => true,
+            ],
+            [
+                'name' => 'dependencies',
+                'targets' => ['class'],
+                'cli_fallback' => 'php artisan agent-kit:refactor-dependencies <class> --json',
+                'json' => true,
+            ],
+            [
+                'name' => 'impact',
+                'targets' => ['class', 'method'],
+                'cli_fallback' => 'php artisan agent-kit:refactor-impact <class> --method=<method> --json',
+                'json' => true,
+            ],
+        ], $result->data['capabilities']);
     }
 
     public function test_it_audits_a_real_project_without_an_ast_index(): void
     {
-        $result = $this->service()->audit($this->root);
+        $parser = $this->countingParser();
+        $callsBeforeAudit = $parser->calls;
+
+        $result = $this->service($parser)->audit($this->root);
 
         $this->assertSame('audit', $result->capability);
         $this->assertSame(realpath($this->root), $result->data['project_root']);
@@ -53,6 +78,9 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         $this->assertCount(7, $result->data['files']);
         $this->assertSame([], $result->diagnostics);
         $this->assertSame([], $result->unresolved);
+        // ProjectScanner is final, so its one-call behavior is covered by the audit output.
+        // The counting parser directly proves that audit never asks CodebaseIndexer to build.
+        $this->assertSame($callsBeforeAudit, $parser->calls);
     }
 
     public function test_it_analyzes_a_class_and_includes_relationships(): void
@@ -60,6 +88,16 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         $result = $this->service()->analyze($this->root, 'Fixtures\\Checkout\\CheckoutService');
 
         $this->assertSame('analyze', $result->capability);
+        $this->assertSame([
+            'target',
+            'method',
+            'metrics',
+            'upstream_dependencies',
+            'direct_callers',
+            'structural_dependencies',
+            'transitive_impact',
+            'risk',
+        ], array_keys($result->data));
         $this->assertSame('Fixtures\\Checkout\\CheckoutService', $result->data['target']);
         $this->assertNull($result->data['method']);
         $this->assertSame([
@@ -87,6 +125,62 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         $this->assertSame(36, $result->data['metrics']['lines']);
         $this->assertSame(2, $result->data['metrics']['methods']);
         $this->assertSame(6, $result->data['metrics']['dependencies']);
+    }
+
+    public function test_it_analyzes_an_absolute_php_file_path(): void
+    {
+        $file = realpath($this->root . '/CheckoutService.php');
+
+        $result = $this->service()->analyze($this->root, $file);
+
+        $this->assertSame('Fixtures\\Checkout\\CheckoutService', $result->data['target']);
+        $this->assertSame('CheckoutService.php', $result->data['metrics']['path']);
+        $this->assertSame(36, $result->data['metrics']['lines']);
+    }
+
+    public function test_it_analyzes_an_existing_class_method(): void
+    {
+        $result = $this->service()->analyze(
+            $this->root,
+            'Fixtures\\Payments\\PaymentService::charge',
+        );
+
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $result->data['target']);
+        $this->assertSame('charge', $result->data['method']);
+        $this->assertNotEmpty($result->data['direct_callers']);
+        $this->assertNotSame('UNKNOWN', $result->data['risk']);
+    }
+
+    public function test_it_analyzes_a_classless_php_file_with_stable_empty_relationships(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-classless-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Standalone.php', "<?php\n\nfunction helper(): void {}\n");
+
+        try {
+            $result = $this->service()->analyze($root, 'Standalone.php');
+
+            $this->assertSame([
+                'target' => 'Standalone.php',
+                'method' => null,
+                'metrics' => [
+                    'path' => 'Standalone.php',
+                    'lines' => 4,
+                    'methods' => 1,
+                    'dependencies' => 0,
+                    'branches' => 0,
+                    'smells' => [],
+                ],
+                'upstream_dependencies' => [],
+                'direct_callers' => [],
+                'structural_dependencies' => [],
+                'transitive_impact' => [],
+                'risk' => 'UNKNOWN',
+            ], $result->data);
+        } finally {
+            unlink($root . '/Standalone.php');
+            rmdir($root);
+        }
     }
 
     public function test_it_finds_callers_and_moves_partial_data_to_the_envelope(): void
@@ -171,7 +265,16 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
 
     public function test_analyze_builds_the_ast_index_only_once(): void
     {
-        $parser = new class(new PhpAstParser()) implements AstParser {
+        $parser = $this->countingParser();
+
+        $this->service($parser)->analyze($this->root, 'Fixtures\\Payments\\PaymentService');
+
+        $this->assertSame(7, $parser->calls);
+    }
+
+    private function countingParser(): AstParser
+    {
+        return new class(new PhpAstParser()) implements AstParser {
             public int $calls = 0;
 
             public function __construct(private readonly AstParser $inner) {}
@@ -183,10 +286,6 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
                 return $this->inner->parse($file, $displayPath);
             }
         };
-
-        $this->service($parser)->analyze($this->root, 'Fixtures\\Payments\\PaymentService');
-
-        $this->assertSame(7, $parser->calls);
     }
 
     private function service(?AstParser $parser = null): DefaultRefactoringCapabilities
