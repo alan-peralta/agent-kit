@@ -38,14 +38,18 @@ final class RefactorAuditCommand extends Command
             return self::SUCCESS;
         }
 
-        $output = (string) ($this->option('output')
-            ?: rtrim(realpath($root) ?: $root, DIRECTORY_SEPARATOR) . '/.agent-kit/refactoring');
+        $requestedOutput = $this->option('output');
+        $customOutput = is_string($requestedOutput) && $requestedOutput !== '';
+        $output = (string) ($customOutput
+            ? $requestedOutput
+            : rtrim(realpath($root) ?: $root, DIRECTORY_SEPARATOR) . '/.agent-kit/refactoring');
         try {
             $this->writeAuditReports(
                 $output,
                 $result->data,
                 $reporter,
                 !$this->option('no-baseline'),
+                $customOutput ? null : (string) $result->data['project_root'],
             );
         } catch (CapabilityException $exception) {
             return $this->renderCapabilityFailure($exception, false);

@@ -115,6 +115,11 @@ final class FaultInjectingReportFilesystem implements ReportFilesystem
         return is_dir($path);
     }
 
+    public function isLink(string $path): bool
+    {
+        return is_link($path);
+    }
+
     public function isRegularFile(string $path): bool
     {
         return is_file($path) && !is_link($path);
@@ -128,6 +133,11 @@ final class FaultInjectingReportFilesystem implements ReportFilesystem
     public function makeDirectory(string $path): bool
     {
         return mkdir($path, 0777, true);
+    }
+
+    public function realPath(string $path): string|false
+    {
+        return realpath($path);
     }
 
     public function createTemporaryFile(string $directory): string|false

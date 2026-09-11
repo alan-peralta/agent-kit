@@ -9,8 +9,11 @@ final class AtomicAuditReportWriter
     public function __construct(private readonly ReportFilesystem $filesystem) {}
 
     /** @param array<string, string> $reports */
-    public function write(string $output, array $reports): void
+    public function write(string $output, array $reports, ?string $requiredRoot = null): void
     {
+        if ($requiredRoot !== null) {
+            $this->ensureContained($output, $requiredRoot);
+        }
         $this->ensureDirectory($output);
 
         $destinations = [];
@@ -59,6 +62,10 @@ final class AtomicAuditReportWriter
 
     private function ensureDirectory(string $output): void
     {
+        if ($this->filesystem->exists($output) && $this->filesystem->isLink($output)) {
+            throw $this->failure("{$output} is a symbolic link.");
+        }
+
         if ($this->filesystem->exists($output) && !$this->filesystem->isDirectory($output)) {
             throw $this->failure("{$output} is not a directory.");
         }
@@ -73,6 +80,46 @@ final class AtomicAuditReportWriter
 
         if (!$this->filesystem->isWritable($output)) {
             throw $this->failure("output directory {$output} is not writable.");
+        }
+    }
+
+    private function ensureContained(string $output, string $requiredRoot): void
+    {
+        $root = $this->filesystem->realPath($requiredRoot);
+        if ($root === false) {
+            throw $this->failure("project root {$requiredRoot} could not be resolved.");
+        }
+
+        $cursor = $output;
+        $suffix = [];
+        while (!$this->filesystem->exists($cursor)) {
+            $parent = dirname($cursor);
+            if ($parent === $cursor) {
+                throw $this->failure("output directory {$output} could not be resolved.");
+            }
+            array_unshift($suffix, basename($cursor));
+            $cursor = $parent;
+        }
+
+        $ancestor = $this->filesystem->realPath($cursor);
+        if ($ancestor === false) {
+            throw $this->failure("output directory {$output} could not be resolved.");
+        }
+
+        $resolvedOutput = rtrim($ancestor, DIRECTORY_SEPARATOR);
+        if ($suffix !== []) {
+            $resolvedOutput .= DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $suffix);
+        }
+
+        $root = rtrim(str_replace('\\', '/', $root), '/');
+        $resolvedOutput = rtrim(str_replace('\\', '/', $resolvedOutput), '/');
+        $contained = $root === ''
+            || $resolvedOutput === $root
+            || str_starts_with($resolvedOutput, $root . '/');
+        if (!$contained) {
+            throw $this->failure(
+                "default output directory {$output} resolves outside project root {$requiredRoot}.",
+            );
         }
     }
 

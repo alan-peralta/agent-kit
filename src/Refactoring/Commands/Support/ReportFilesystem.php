@@ -8,11 +8,15 @@ interface ReportFilesystem
 
     public function isDirectory(string $path): bool;
 
+    public function isLink(string $path): bool;
+
     public function isRegularFile(string $path): bool;
 
     public function isWritable(string $path): bool;
 
     public function makeDirectory(string $path): bool;
+
+    public function realPath(string $path): string|false;
 
     public function createTemporaryFile(string $directory): string|false;
 

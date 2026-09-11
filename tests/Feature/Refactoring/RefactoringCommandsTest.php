@@ -33,7 +33,9 @@ final class RefactoringCommandsTest extends TestCase
                 \RecursiveIteratorIterator::CHILD_FIRST,
             );
             foreach ($files as $file) {
-                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+                $file->isLink() || !$file->isDir()
+                    ? unlink($file->getPathname())
+                    : rmdir($file->getPathname());
             }
             rmdir($directory);
         }
@@ -249,6 +251,44 @@ final class RefactoringCommandsTest extends TestCase
         self::assertNotSame('stale', file_get_contents($output . '/audit.md'));
         self::assertNotSame('stale', file_get_contents($output . '/baseline.json'));
         self::assertSame([], glob($output . '/.agent-kit-*') ?: []);
+    }
+
+    public function test_audit_rejects_a_symlink_output_directory_without_touching_its_external_target(): void
+    {
+        $project = $this->temporaryDirectory();
+        $external = $this->temporaryDirectory();
+        file_put_contents($project . '/Service.php', '<?php class Service {}');
+        file_put_contents($external . '/sentinel', 'untouched');
+        $output = $project . '/reports';
+        symlink($external, $output);
+
+        $status = Artisan::call('agent-kit:refactor-audit', [
+            'path' => $project,
+            '--output' => $output,
+        ]);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString("{$output} is a symbolic link", Artisan::output());
+        self::assertSame('untouched', file_get_contents($external . '/sentinel'));
+        self::assertFileDoesNotExist($external . '/audit.json');
+        self::assertFileDoesNotExist($external . '/audit.md');
+        self::assertFileDoesNotExist($external . '/baseline.json');
+        self::assertSame([], glob($external . '/.agent-kit-*') ?: []);
+    }
+
+    public function test_default_audit_output_cannot_escape_through_an_ancestor_symlink(): void
+    {
+        $project = $this->temporaryDirectory();
+        $external = $this->temporaryDirectory();
+        file_put_contents($project . '/Service.php', '<?php class Service {}');
+        symlink($external, $project . '/.agent-kit');
+
+        $status = Artisan::call('agent-kit:refactor-audit', ['path' => $project]);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString('resolves outside project root', Artisan::output());
+        self::assertDirectoryDoesNotExist($external . '/refactoring');
+        self::assertSame([], glob($external . '/.agent-kit-*') ?: []);
     }
 
     public function test_provider_binds_default_capabilities_and_commands_inject_only_the_application_contract(): void

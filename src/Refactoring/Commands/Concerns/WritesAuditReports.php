@@ -13,6 +13,7 @@ trait WritesAuditReports
         array $report,
         RefactoringReport $reporter,
         bool $includeBaseline,
+        ?string $requiredRoot = null,
     ): void {
         $contents = [
             'audit.json' => json_encode(
@@ -28,6 +29,10 @@ trait WritesAuditReports
             );
         }
 
-        (new AtomicAuditReportWriter(new NativeReportFilesystem()))->write($output, $contents);
+        (new AtomicAuditReportWriter(new NativeReportFilesystem()))->write(
+            $output,
+            $contents,
+            $requiredRoot,
+        );
     }
 }
