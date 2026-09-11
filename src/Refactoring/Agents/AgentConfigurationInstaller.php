@@ -203,7 +203,7 @@ final class AgentConfigurationInstaller
                 }
 
                 if (!is_dir($current)) {
-                    throw new RuntimeException("Generated agent parent symlink is not a directory: {$relativePath}");
+                    return false;
                 }
 
                 continue;

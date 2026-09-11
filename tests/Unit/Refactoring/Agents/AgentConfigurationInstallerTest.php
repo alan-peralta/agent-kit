@@ -324,6 +324,26 @@ final class AgentConfigurationInstallerTest extends TestCase
         self::assertSame('created', file_get_contents($root . '/later/file.md'));
     }
 
+    public function test_parent_symlink_to_an_in_root_regular_file_is_a_conflict(): void
+    {
+        $root = $this->temporaryDirectory();
+        file_put_contents($root . '/user-owned', 'original');
+        symlink($root . '/user-owned', $root . '/blocked');
+        $adapter = self::adapter('safe', [
+            new GeneratedAgentFile('blocked/file.md', 'replacement'),
+            new GeneratedAgentFile('later/file.md', 'created'),
+        ]);
+
+        $result = $this->installer([$adapter])->install($root, ['safe']);
+
+        self::assertSame(['later/file.md'], $result->created);
+        self::assertSame(['blocked/file.md'], $result->conflicts);
+        self::assertTrue(is_link($root . '/blocked'));
+        self::assertSame($root . '/user-owned', readlink($root . '/blocked'));
+        self::assertSame('original', file_get_contents($root . '/user-owned'));
+        self::assertSame('created', file_get_contents($root . '/later/file.md'));
+    }
+
     public function test_unreadable_target_is_a_conflict_and_does_not_stop_later_creations(): void
     {
         $root = $this->temporaryDirectory();
