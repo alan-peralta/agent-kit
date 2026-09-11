@@ -17,7 +17,7 @@ final class InstallAgentsCommand extends Command
         {--path= : Consumer project root}
         {--force : Overwrite conflicting Agent Kit-dedicated files}';
 
-    protected $description = 'Install Agent Kit refactoring skills and rules for supported coding agents';
+    protected $description = 'Install Agent Kit refactoring skills for coding agents';
 
     public function handle(
         AgentConfigurationInstaller $installer,
@@ -106,7 +106,7 @@ final class InstallAgentsCommand extends Command
         }
 
         foreach ($result->conflicts as $path) {
-            $this->line("CONFLICT {$path}");
+            $this->line("CONFLICTS {$path}");
         }
     }
 }

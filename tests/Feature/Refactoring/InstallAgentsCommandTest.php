@@ -7,7 +7,9 @@ use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
 use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
 use Peralta\AgentKit\Refactoring\Agents\AgentTemplateRenderer;
+use Peralta\AgentKit\Refactoring\Commands\InstallAgentsCommand;
 use Peralta\AgentKit\Tests\TestCase;
+use ReflectionProperty;
 
 final class InstallAgentsCommandTest extends TestCase
 {
@@ -88,7 +90,7 @@ final class InstallAgentsCommandTest extends TestCase
         self::assertSame(1, $status);
         self::assertSame('custom content', file_get_contents($conflict));
         self::assertCount(7, $this->files($root));
-        self::assertStringContainsString("CONFLICT .cursor/skills/refactor-audit/SKILL.md", $output);
+        self::assertStringContainsString("CONFLICTS .cursor/skills/refactor-audit/SKILL.md", $output);
         self::assertSame(6, substr_count($output, 'CREATED '));
     }
 
@@ -210,6 +212,21 @@ final class InstallAgentsCommandTest extends TestCase
         self::assertSame(['cursor', 'claude'], $registry->ids());
         self::assertSame(['audit', 'analyze', 'callers', 'dependencies', 'impact', 'plan'], $repository->names());
         self::assertStringContainsString('{{cli_audit}} --json', $repository->command('audit'));
+    }
+
+    public function test_command_signature_and_description_match_the_public_contract(): void
+    {
+        $command = $this->app->make(InstallAgentsCommand::class);
+        $signature = (new ReflectionProperty($command, 'signature'))->getValue($command);
+
+        self::assertSame(
+            'agent-kit:agents:install {agents?* : cursor and/or claude} {--all : Install every supported adapter} {--path= : Consumer project root} {--force : Overwrite conflicting Agent Kit-dedicated files}',
+            preg_replace('/\s+/', ' ', trim($signature)),
+        );
+        self::assertSame(
+            'Install Agent Kit refactoring skills for coding agents',
+            $command->getDescription(),
+        );
     }
 
     private function temporaryDirectory(): string
