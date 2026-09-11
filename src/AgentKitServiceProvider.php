@@ -44,8 +44,15 @@ use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
+use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
+use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
+use Peralta\AgentKit\Refactoring\Agents\AgentTemplateRenderer;
+use Peralta\AgentKit\Refactoring\Agents\ClaudeCodeAgentAdapter;
+use Peralta\AgentKit\Refactoring\Agents\CursorAgentAdapter;
 use Peralta\AgentKit\Refactoring\Application\DefaultRefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Commands\InstallAgentsCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorAnalyzeCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorAuditCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
@@ -83,6 +90,7 @@ class AgentKitServiceProvider extends ServiceProvider
             ], 'agent-kit-migrations');
 
             $this->commands([
+                InstallAgentsCommand::class,
                 RefactorAuditCommand::class,
                 RefactorAnalyzeCommand::class,
                 RefactorCapabilitiesCommand::class,
@@ -274,6 +282,20 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(CodebaseIndexer::class),
             $app->make(CallerAnalyzer::class),
             $app->make(ImpactAnalyzer::class),
+        ));
+
+        $this->app->singleton(AgentCommandRepository::class, fn () => new AgentCommandRepository(
+            __DIR__ . '/../resources/agents/refactoring',
+        ));
+        $this->app->singleton(AgentTemplateRenderer::class);
+        $this->app->singleton(AgentAdapterRegistry::class, fn () => new AgentAdapterRegistry([
+            new CursorAgentAdapter(),
+            new ClaudeCodeAgentAdapter(),
+        ]));
+        $this->app->singleton(AgentConfigurationInstaller::class, fn ($app) => new AgentConfigurationInstaller(
+            $app->make(AgentAdapterRegistry::class),
+            $app->make(AgentCommandRepository::class),
+            $app->make(AgentTemplateRenderer::class),
         ));
     }
 
