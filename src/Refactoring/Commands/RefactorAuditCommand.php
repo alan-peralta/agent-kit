@@ -6,11 +6,13 @@ use Illuminate\Console\Command;
 use Peralta\AgentKit\Refactoring\Application\CapabilityException;
 use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Commands\Concerns\RendersCapabilityResults;
+use Peralta\AgentKit\Refactoring\Commands\Concerns\WritesAuditReports;
 use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
 
 final class RefactorAuditCommand extends Command
 {
     use RendersCapabilityResults;
+    use WritesAuditReports;
 
     protected $signature = 'agent-kit:refactor-audit
         {path? : Project root}
@@ -38,27 +40,15 @@ final class RefactorAuditCommand extends Command
 
         $output = (string) ($this->option('output')
             ?: rtrim(realpath($root) ?: $root, DIRECTORY_SEPARATOR) . '/.agent-kit/refactoring');
-        if (!is_dir($output) && !mkdir($output, 0777, true) && !is_dir($output)) {
-            return $this->renderCapabilityFailure(
-                new CapabilityException('OUTPUT_WRITE_FAILED', "Could not create output directory: {$output}"),
-                false,
+        try {
+            $this->writeAuditReports(
+                $output,
+                $result->data,
+                $reporter,
+                !$this->option('no-baseline'),
             );
-        }
-
-        file_put_contents(
-            $output . '/audit.json',
-            json_encode($result->data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-        );
-        file_put_contents($output . '/audit.md', $reporter->markdown($result->data));
-
-        if (!$this->option('no-baseline')) {
-            file_put_contents(
-                $output . '/baseline.json',
-                json_encode(
-                    $result->data['summary'],
-                    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-                ),
-            );
+        } catch (CapabilityException $exception) {
+            return $this->renderCapabilityFailure($exception, false);
         }
 
         $summary = $result->data['summary'];

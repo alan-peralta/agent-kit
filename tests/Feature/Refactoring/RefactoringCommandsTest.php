@@ -206,6 +206,51 @@ final class RefactoringCommandsTest extends TestCase
         self::assertStringContainsString('Reports written to', Artisan::output());
     }
 
+    public function test_audit_rejects_a_report_target_directory_without_creating_partial_reports(): void
+    {
+        $output = $this->temporaryDirectory() . '/reports';
+        mkdir($output, 0777, true);
+        mkdir($output . '/audit.json');
+
+        try {
+            $status = Artisan::call('agent-kit:refactor-audit', [
+                'path' => $this->fixtureRoot(),
+                '--output' => $output,
+            ]);
+        } catch (\Throwable $exception) {
+            self::fail('The command must render a stable failure instead of throwing: ' . $exception->getMessage());
+        }
+
+        self::assertSame(1, $status);
+        self::assertSame(
+            "Cannot write audit report: {$output}/audit.json is not a regular file.\n",
+            Artisan::output(),
+        );
+        self::assertDirectoryExists($output . '/audit.json');
+        self::assertFileDoesNotExist($output . '/audit.md');
+        self::assertFileDoesNotExist($output . '/baseline.json');
+    }
+
+    public function test_audit_atomically_overwrites_existing_regular_report_files(): void
+    {
+        $output = $this->temporaryDirectory() . '/reports';
+        mkdir($output, 0777, true);
+        foreach (['audit.json', 'audit.md', 'baseline.json'] as $file) {
+            file_put_contents($output . '/' . $file, 'stale');
+        }
+
+        $status = Artisan::call('agent-kit:refactor-audit', [
+            'path' => $this->fixtureRoot(),
+            '--output' => $output,
+        ]);
+
+        self::assertSame(0, $status);
+        self::assertNotSame('stale', file_get_contents($output . '/audit.json'));
+        self::assertNotSame('stale', file_get_contents($output . '/audit.md'));
+        self::assertNotSame('stale', file_get_contents($output . '/baseline.json'));
+        self::assertSame([], glob($output . '/.agent-kit-*') ?: []);
+    }
+
     public function test_provider_binds_default_capabilities_and_commands_inject_only_the_application_contract(): void
     {
         self::assertInstanceOf(DefaultRefactoringCapabilities::class, $this->app->make(RefactoringCapabilities::class));
