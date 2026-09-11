@@ -44,9 +44,12 @@ use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Application\DefaultRefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Commands\RefactorAnalyzeCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorAuditCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorCapabilitiesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorDependenciesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorImpactCommand;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
@@ -82,6 +85,7 @@ class AgentKitServiceProvider extends ServiceProvider
             $this->commands([
                 RefactorAuditCommand::class,
                 RefactorAnalyzeCommand::class,
+                RefactorCapabilitiesCommand::class,
                 RefactorCallersCommand::class,
                 RefactorDependenciesCommand::class,
                 RefactorImpactCommand::class,
@@ -262,6 +266,14 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->app->singleton(CallerAnalyzer::class);
         $this->app->bind(ImpactAnalyzer::class, fn () => new ImpactAnalyzer(
             config('agent-kit.refactoring.impact_thresholds', []),
+        ));
+        $this->app->bind(RefactoringCapabilities::class, fn ($app) => new DefaultRefactoringCapabilities(
+            $app->make(ProjectScanner::class),
+            $app->make(PhpFileAnalyzer::class),
+            $app->make(RefactoringReport::class),
+            $app->make(CodebaseIndexer::class),
+            $app->make(CallerAnalyzer::class),
+            $app->make(ImpactAnalyzer::class),
         ));
     }
 

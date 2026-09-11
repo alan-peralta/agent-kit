@@ -3,69 +3,68 @@
 namespace Peralta\AgentKit\Refactoring\Commands;
 
 use Illuminate\Console\Command;
-use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
-use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Application\CapabilityException;
+use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Commands\Concerns\RendersCapabilityResults;
 
 final class RefactorCallersCommand extends Command
 {
+    use RendersCapabilityResults;
+
     protected $signature = 'agent-kit:refactor-callers
-        {class : Fully qualified target class}
-        {--method= : Optional target method}
+        {target : Fully qualified class or Class::method}
+        {--method= : Deprecated method scope; prefer Class::method}
         {--path= : Project root; defaults to the Laravel base path}
         {--json : Emit JSON only}';
 
-    protected $description = 'Find direct callers and structural dependencies of a PHP class';
+    protected $description = 'Find direct callers and structural dependencies of a PHP class or method';
 
-    public function handle(CodebaseIndexer $indexer, CallerAnalyzer $analyzer): int
+    public function handle(RefactoringCapabilities $capabilities): int
     {
-        try {
-            $root = $this->root();
-            $result = $analyzer->findCallers(
-                $indexer->build($root),
-                (string) $this->argument('class'),
-                $this->option('method') !== null ? (string) $this->option('method') : null,
-            );
-        } catch (\InvalidArgumentException $exception) {
-            $this->error($exception->getMessage());
+        $target = (string) $this->argument('target');
+        if ($this->option('method') !== null) {
+            $target .= '::' . (string) $this->option('method');
+        }
 
-            return self::FAILURE;
+        try {
+            $result = $capabilities->findCallers(
+                (string) ($this->option('path') ?: base_path()),
+                $target,
+            );
+        } catch (CapabilityException $exception) {
+            return $this->renderCapabilityFailure($exception, (bool) $this->option('json'));
         }
 
         if ($this->option('json')) {
-            $this->line(json_encode($result->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            $this->renderJson($result);
 
             return self::SUCCESS;
         }
 
+        $data = $result->data;
         $this->info('REFACTORING CALLER ANALYSIS');
-        $this->line('Target: ' . $result->target . ($result->method ? '::' . $result->method : ''));
+        $this->line('Target: ' . $data['target'] . ($data['method'] ? '::' . $data['method'] : ''));
         $this->newLine();
         $this->info('DIRECT CALLERS');
-        $this->renderEdges($result->directCallers);
+        $this->renderIncomingEdges($data['direct_callers']);
         $this->newLine();
         $this->info('STRUCTURAL DEPENDENCIES');
-        $this->renderEdges($result->structuralDependencies);
-        $this->renderDiagnosticWarning($result->diagnostics);
+        $this->renderIncomingEdges($data['structural_dependencies']);
+        $this->newLine();
+        $this->info('TRANSITIVE DEPENDENTS');
+        foreach ($data['transitive_dependents'] as $dependent) {
+            $this->line(implode(' -> ', $dependent['path']));
+        }
+        $this->renderIncompleteWarning($result->incomplete());
 
         return self::SUCCESS;
     }
 
-    private function root(): string
-    {
-        $requested = (string) ($this->option('path') ?: base_path());
-        $root = realpath($requested);
-        if ($root === false || !is_dir($root)) {
-            throw new \InvalidArgumentException("Project root not found: {$requested}");
-        }
-
-        return $root;
-    }
-
-    private function renderEdges(array $edges): void
+    private function renderIncomingEdges(array $edges): void
     {
         $this->table(
             ['Source', 'Method', 'Type', 'Confidence', 'Location'],
-            array_map(fn (array $edge) => [
+            array_map(static fn (array $edge): array => [
                 $edge['source'],
                 $edge['source_method'] ?? '-',
                 strtoupper($edge['type']),
@@ -75,10 +74,10 @@ final class RefactorCallersCommand extends Command
         );
     }
 
-    private function renderDiagnosticWarning(array $diagnostics): void
+    private function renderIncompleteWarning(bool $incomplete): void
     {
-        if ($diagnostics !== []) {
-            $this->warn(count($diagnostics) . ' PHP file(s) could not be parsed; results may be incomplete.');
+        if ($incomplete) {
+            $this->warn('Static analysis is incomplete; inspect diagnostics and unresolved references.');
         }
     }
 }

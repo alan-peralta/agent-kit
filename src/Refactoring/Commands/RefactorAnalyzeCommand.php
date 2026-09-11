@@ -3,37 +3,65 @@
 namespace Peralta\AgentKit\Refactoring\Commands;
 
 use Illuminate\Console\Command;
-use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
+use Peralta\AgentKit\Refactoring\Application\CapabilityException;
+use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Commands\Concerns\RendersCapabilityResults;
 
 final class RefactorAnalyzeCommand extends Command
 {
-    protected $signature = 'agent-kit:refactor-analyze {file : PHP file to analyze}';
-    protected $description = 'Analyze one PHP file for deterministic refactoring signals';
+    use RendersCapabilityResults;
 
-    public function handle(PhpFileAnalyzer $analyzer): int
+    protected $signature = 'agent-kit:refactor-analyze
+        {target : Project-relative PHP file, absolute in-project PHP file, fully qualified class, or Class::method}
+        {--path= : Project root; defaults to the Laravel base path}
+        {--json : Emit JSON only}';
+
+    protected $description = 'Analyze a PHP file, class, or method for deterministic refactoring signals';
+
+    public function handle(RefactoringCapabilities $capabilities): int
     {
-        $file = $this->argument('file');
-        $path = realpath($file) ?: realpath(base_path($file));
-        if (!$path || !is_file($path)) {
-            $this->error("File not found: {$file}");
-            return self::FAILURE;
+        try {
+            $result = $capabilities->analyze(
+                (string) ($this->option('path') ?: base_path()),
+                (string) $this->argument('target'),
+            );
+        } catch (CapabilityException $exception) {
+            return $this->renderCapabilityFailure($exception, (bool) $this->option('json'));
         }
 
-        $result = $analyzer->analyze($path, $file);
-        $this->table(['Metric', 'Value'], [
-            ['Lines', $result->lines],
-            ['Methods/functions', $result->methods],
-            ['Imports/uses', $result->dependencies],
-            ['Branches', $result->branches],
-        ]);
+        if ($this->option('json')) {
+            $this->renderJson($result);
 
-        if (!$result->smells) {
-            $this->info('No threshold-based smells detected.');
             return self::SUCCESS;
         }
 
-        $this->newLine();
-        $this->table(['Severity', 'Smell', 'Reason'], array_map(fn ($s) => [strtoupper($s['severity']), $s['name'], $s['reason']], $result->smells));
+        $metrics = $result->data['metrics'];
+        $this->table(['Metric', 'Value'], [
+            ['Target', $result->data['target']],
+            ['Lines', $metrics['lines']],
+            ['Methods/functions', $metrics['methods']],
+            ['Imports/uses', $metrics['dependencies']],
+            ['Branches', $metrics['branches']],
+            ['Risk', $result->data['risk'] ?? 'UNKNOWN'],
+        ]);
+
+        if ($metrics['smells'] === []) {
+            $this->info('No threshold-based smells detected.');
+        } else {
+            $this->table(
+                ['Severity', 'Smell', 'Reason'],
+                array_map(static fn (array $smell): array => [
+                    strtoupper($smell['severity']),
+                    $smell['name'],
+                    $smell['reason'],
+                ], $metrics['smells']),
+            );
+        }
+
+        if ($result->incomplete()) {
+            $this->warn('Static analysis is incomplete; inspect diagnostics and unresolved references.');
+        }
+
         return self::SUCCESS;
     }
 }

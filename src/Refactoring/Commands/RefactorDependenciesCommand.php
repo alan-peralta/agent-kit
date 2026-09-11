@@ -3,70 +3,84 @@
 namespace Peralta\AgentKit\Refactoring\Commands;
 
 use Illuminate\Console\Command;
-use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Application\CapabilityException;
+use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Commands\Concerns\RendersCapabilityResults;
 
 final class RefactorDependenciesCommand extends Command
 {
+    use RendersCapabilityResults;
+
     protected $signature = 'agent-kit:refactor-dependencies
-        {class : Fully qualified target class}
+        {target : Fully qualified target class}
         {--path= : Project root; defaults to the Laravel base path}
         {--json : Emit JSON only}';
 
-    protected $description = 'List typed outgoing dependencies of a PHP class';
+    protected $description = 'List typed upstream dependencies and downstream dependents of a PHP class';
 
-    public function handle(CodebaseIndexer $indexer): int
+    public function handle(RefactoringCapabilities $capabilities): int
     {
         try {
-            $root = $this->root();
-            $index = $indexer->build($root);
-            $target = ltrim((string) $this->argument('class'), '\\');
-            if ($index->findClass($target) === null) {
-                throw new \InvalidArgumentException("Classe não encontrada no índice: {$target}");
-            }
-            $data = [
-                'target' => $target,
-                'dependencies' => array_map(fn ($edge) => $edge->toArray(), $index->findDependencies($target)),
-                'diagnostics' => array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics()),
-            ];
-        } catch (\InvalidArgumentException $exception) {
-            $this->error($exception->getMessage());
-
-            return self::FAILURE;
+            $result = $capabilities->dependencies(
+                (string) ($this->option('path') ?: base_path()),
+                (string) $this->argument('target'),
+            );
+        } catch (CapabilityException $exception) {
+            return $this->renderCapabilityFailure($exception, (bool) $this->option('json'));
         }
 
         if ($this->option('json')) {
-            $this->line(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            $this->renderJson($result);
 
             return self::SUCCESS;
         }
 
+        $data = $result->data;
         $this->info('REFACTORING DEPENDENCY ANALYSIS');
-        $this->line("Target: {$target}");
-        $this->table(
-            ['Target', 'Method', 'Type', 'Confidence', 'Location'],
-            array_map(fn (array $edge) => [
-                $edge['target'],
-                $edge['target_method'] ?? '-',
-                strtoupper($edge['type']),
-                strtoupper($edge['confidence']),
-                $edge['file'] . ':' . $edge['line'],
-            ], $data['dependencies']),
-        );
-        if ($data['diagnostics'] !== []) {
-            $this->warn(count($data['diagnostics']) . ' PHP file(s) could not be parsed; results may be incomplete.');
+        $this->line('Target: ' . $data['target']);
+        $this->newLine();
+        $this->info('UPSTREAM DEPENDENCIES');
+        $this->renderOutgoingEdges($data['upstream_dependencies']);
+        $this->newLine();
+        $this->info('DOWNSTREAM DEPENDENTS');
+        $this->renderIncomingEdges($data['downstream_dependents']);
+        $this->newLine();
+        $this->info('TRANSITIVE DEPENDENTS');
+        foreach ($data['transitive_dependents'] as $dependent) {
+            $this->line(implode(' -> ', $dependent['path']));
+        }
+        if ($result->incomplete()) {
+            $this->warn('Static analysis is incomplete; inspect diagnostics and unresolved references.');
         }
 
         return self::SUCCESS;
     }
 
-    private function root(): string
+    private function renderIncomingEdges(array $edges): void
     {
-        $requested = (string) ($this->option('path') ?: base_path());
-        $root = realpath($requested);
-        if ($root === false || !is_dir($root)) {
-            throw new \InvalidArgumentException("Project root not found: {$requested}");
-        }
+        $this->table(
+            ['Source', 'Method', 'Type', 'Confidence', 'Location'],
+            array_map(static fn (array $edge): array => [
+                $edge['source'],
+                $edge['source_method'] ?? '-',
+                strtoupper($edge['type']),
+                strtoupper($edge['confidence']),
+                $edge['file'] . ':' . $edge['line'],
+            ], $edges),
+        );
+    }
 
-        return $root;
+    private function renderOutgoingEdges(array $edges): void
+    {
+        $this->table(
+            ['Target', 'Method', 'Type', 'Confidence', 'Location'],
+            array_map(static fn (array $edge): array => [
+                $edge['target'],
+                $edge['target_method'] ?? '-',
+                strtoupper($edge['type']),
+                strtoupper($edge['confidence']),
+                $edge['file'] . ':' . $edge['line'],
+            ], $edges),
+        );
     }
 }

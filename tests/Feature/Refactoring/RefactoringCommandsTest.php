@@ -3,102 +3,261 @@
 namespace Peralta\AgentKit\Tests\Feature\Refactoring;
 
 use Illuminate\Support\Facades\Artisan;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParsedFile;
+use Peralta\AgentKit\Refactoring\Application\DefaultRefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Commands\RefactorAnalyzeCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorAuditCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorDependenciesCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorImpactCommand;
+use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
 use Peralta\AgentKit\Tests\TestCase;
+use ReflectionMethod;
 
 final class RefactoringCommandsTest extends TestCase
 {
-    public function test_callers_command_emits_machine_readable_json(): void
+    /** @var list<string> */
+    private array $temporaryDirectories = [];
+
+    protected function tearDown(): void
+    {
+        foreach (array_reverse($this->temporaryDirectories) as $directory) {
+            if (!is_dir($directory)) {
+                continue;
+            }
+
+            $files = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($files as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($directory);
+        }
+
+        parent::tearDown();
+    }
+
+    public function test_capability_discovery_emits_the_versioned_json_envelope_only(): void
+    {
+        $status = Artisan::call('agent-kit:refactor-capabilities', ['--json' => true]);
+        $output = Artisan::output();
+        $decoded = json_decode($output, true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame(0, $status);
+        self::assertSame(
+            ['schema_version', 'capability', 'incomplete', 'data', 'diagnostics', 'unresolved'],
+            array_keys($decoded),
+        );
+        self::assertSame('1.0', $decoded['schema_version']);
+        self::assertSame('capability_discovery', $decoded['capability']);
+        self::assertFalse($decoded['incomplete']);
+        self::assertSame(
+            ['audit', 'analyze', 'find_callers', 'dependencies', 'impact'],
+            array_column($decoded['data']['capabilities'], 'name'),
+        );
+        self::assertSame(
+            json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            trim($output),
+        );
+    }
+
+    public function test_audit_json_is_side_effect_free_and_does_not_parse_ast(): void
+    {
+        $output = $this->temporaryDirectory() . '/reports';
+        $this->app->bind(AstParser::class, fn () => new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                throw new \RuntimeException('Audit must not parse AST.');
+            }
+        });
+
+        $status = Artisan::call('agent-kit:refactor-audit', [
+            'path' => $this->fixtureRoot(),
+            '--output' => $output,
+            '--json' => true,
+        ]);
+        $decoded = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame(0, $status);
+        self::assertSame('audit', $decoded['capability']);
+        self::assertArrayHasKey('summary', $decoded['data']);
+        self::assertDirectoryDoesNotExist($output);
+    }
+
+    public function test_analyze_json_accepts_class_and_absolute_file_targets(): void
+    {
+        self::assertSame(0, Artisan::call('agent-kit:refactor-analyze', [
+            'target' => 'Fixtures\\Checkout\\CheckoutService',
+            '--path' => $this->fixtureRoot(),
+            '--json' => true,
+        ]));
+        $class = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame('analyze', $class['capability']);
+        self::assertSame('Fixtures\\Checkout\\CheckoutService', $class['data']['target']);
+        self::assertSame('CheckoutService.php', $class['data']['metrics']['path']);
+
+        self::assertSame(0, Artisan::call('agent-kit:refactor-analyze', [
+            'target' => $this->fixtureRoot() . '/CheckoutService.php',
+            '--path' => $this->fixtureRoot(),
+            '--json' => true,
+        ]));
+        $file = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame('CheckoutService.php', $file['data']['target']);
+        self::assertSame('CheckoutService.php', $file['data']['metrics']['path']);
+    }
+
+    public function test_callers_json_forwards_class_method_target(): void
     {
         $status = Artisan::call('agent-kit:refactor-callers', [
-            'class' => 'Fixtures\\Payments\\PaymentService',
+            'target' => 'Fixtures\\Payments\\PaymentService::charge',
+            '--path' => $this->fixtureRoot(),
+            '--json' => true,
+        ]);
+        $decoded = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame(0, $status);
+        self::assertSame('find_callers', $decoded['capability']);
+        self::assertSame('Fixtures\\Payments\\PaymentService', $decoded['data']['target']);
+        self::assertSame('charge', $decoded['data']['method']);
+        self::assertNotEmpty($decoded['data']['direct_callers']);
+    }
+
+    public function test_legacy_method_option_is_forwarded_without_changing_the_canonical_target_argument(): void
+    {
+        $status = Artisan::call('agent-kit:refactor-impact', [
+            'target' => 'Fixtures\\Payments\\PaymentService',
             '--method' => 'charge',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]);
-
         $decoded = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
-        $this->assertSame(0, $status);
-        $this->assertSame('Fixtures\\Payments\\PaymentService', $decoded['target']);
-        $this->assertSame('charge', $decoded['method']);
-        $this->assertNotEmpty($decoded['direct_callers']);
+
+        self::assertSame(0, $status);
+        self::assertSame('charge', $decoded['data']['method']);
     }
 
-    public function test_dependencies_and_impact_commands_emit_json(): void
+    public function test_dependencies_and_impact_emit_versioned_json(): void
     {
-        $this->assertSame(0, Artisan::call('agent-kit:refactor-dependencies', [
-            'class' => 'Fixtures\\Checkout\\CheckoutService',
+        self::assertSame(0, Artisan::call('agent-kit:refactor-dependencies', [
+            'target' => 'Fixtures\\Checkout\\CheckoutService',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]));
         $dependencies = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
-        $this->assertSame('Fixtures\\Checkout\\CheckoutService', $dependencies['target']);
-        $this->assertNotEmpty($dependencies['dependencies']);
+        self::assertSame('dependencies', $dependencies['capability']);
+        self::assertNotEmpty($dependencies['data']['upstream_dependencies']);
+        self::assertArrayHasKey('downstream_dependents', $dependencies['data']);
 
-        $this->assertSame(0, Artisan::call('agent-kit:refactor-impact', [
-            'class' => 'Fixtures\\Payments\\PaymentService',
+        self::assertSame(0, Artisan::call('agent-kit:refactor-impact', [
+            'target' => 'Fixtures\\Payments\\PaymentService::charge',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]));
         $impact = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
-        $this->assertSame('LOW', $impact['risk']);
-        $this->assertArrayHasKey('transitive_dependents', $impact);
+        self::assertSame('impact', $impact['capability']);
+        self::assertSame('charge', $impact['data']['method']);
+        self::assertArrayHasKey('transitive_dependents', $impact['data']);
     }
 
-    public function test_commands_render_human_headings(): void
+    public function test_json_failure_uses_the_exact_stable_error_envelope(): void
     {
-        $this->assertSame(0, Artisan::call('agent-kit:refactor-impact', [
-            'class' => 'Fixtures\\Payments\\PaymentService',
+        $status = Artisan::call('agent-kit:refactor-impact', [
+            'target' => 'Missing\\Service',
             '--path' => $this->fixtureRoot(),
-        ]));
+            '--json' => true,
+        ]);
 
-        $output = Artisan::output();
-        $this->assertStringContainsString('REFACTORING IMPACT ANALYSIS', $output);
-        $this->assertStringContainsString('DIRECT CALLERS', $output);
-        $this->assertStringContainsString('STRUCTURAL DEPENDENCIES', $output);
+        self::assertSame(1, $status);
+        self::assertSame([
+            'schema_version' => '1.0',
+            'error' => [
+                'code' => 'TARGET_NOT_FOUND',
+                'message' => 'Class not found: Missing\\Service',
+            ],
+        ], json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR));
     }
 
-    public function test_commands_fail_for_invalid_roots_and_missing_targets(): void
+    public function test_human_commands_render_useful_output_and_audit_reports(): void
     {
-        $this->assertSame(1, Artisan::call('agent-kit:refactor-impact', [
-            'class' => 'Anything',
-            '--path' => '/path/that/does/not/exist',
-            '--json' => true,
-        ]));
-        $this->assertStringContainsString('Project root not found', Artisan::output());
-
-        $this->assertSame(1, Artisan::call('agent-kit:refactor-callers', [
-            'class' => 'Missing\\Service',
+        self::assertSame(0, Artisan::call('agent-kit:refactor-impact', [
+            'target' => 'Fixtures\\Payments\\PaymentService',
             '--path' => $this->fixtureRoot(),
-            '--json' => true,
         ]));
-        $this->assertStringContainsString('Missing\\Service', Artisan::output());
+        $impactOutput = Artisan::output();
+        self::assertStringContainsString('REFACTORING IMPACT ANALYSIS', $impactOutput);
+        self::assertStringContainsString('DIRECT CALLERS', $impactOutput);
+        self::assertStringContainsString('STRUCTURAL DEPENDENCIES', $impactOutput);
+
+        $output = $this->temporaryDirectory() . '/reports';
+        self::assertSame(0, Artisan::call('agent-kit:refactor-audit', [
+            'path' => $this->fixtureRoot(),
+            '--output' => $output,
+            '--no-baseline' => true,
+        ]));
+        self::assertFileExists($output . '/audit.json');
+        self::assertFileExists($output . '/audit.md');
+        self::assertFileDoesNotExist($output . '/baseline.json');
+        self::assertStringContainsString('Reports written to', Artisan::output());
+    }
+
+    public function test_provider_binds_default_capabilities_and_commands_inject_only_the_application_contract(): void
+    {
+        self::assertInstanceOf(DefaultRefactoringCapabilities::class, $this->app->make(RefactoringCapabilities::class));
+
+        foreach ([
+            RefactorAnalyzeCommand::class,
+            RefactorCallersCommand::class,
+            RefactorDependenciesCommand::class,
+            RefactorImpactCommand::class,
+        ] as $command) {
+            $parameters = (new ReflectionMethod($command, 'handle'))->getParameters();
+            self::assertCount(1, $parameters);
+            self::assertSame(RefactoringCapabilities::class, $parameters[0]->getType()?->getName());
+        }
+
+        $auditParameters = (new ReflectionMethod(RefactorAuditCommand::class, 'handle'))->getParameters();
+        self::assertSame(
+            [RefactoringCapabilities::class, RefactoringReport::class],
+            array_map(fn ($parameter) => $parameter->getType()?->getName(), $auditParameters),
+        );
     }
 
     public function test_json_contains_non_fatal_parse_diagnostics(): void
     {
-        $root = sys_get_temp_dir() . '/agent-kit-cli-' . bin2hex(random_bytes(6));
-        mkdir($root, 0777, true);
+        $root = $this->temporaryDirectory();
         file_put_contents($root . '/Valid.php', '<?php namespace Demo; class Valid {}');
         file_put_contents($root . '/Broken.php', '<?php class Broken {');
 
         $status = Artisan::call('agent-kit:refactor-impact', [
-            'class' => 'Demo\\Valid',
+            'target' => 'Demo\\Valid',
             '--path' => $root,
             '--json' => true,
         ]);
         $decoded = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
 
-        unlink($root . '/Valid.php');
-        unlink($root . '/Broken.php');
-        rmdir($root);
-
-        $this->assertSame(0, $status);
-        $this->assertCount(1, $decoded['diagnostics']);
-        $this->assertSame('Broken.php', $decoded['diagnostics'][0]['file']);
+        self::assertSame(0, $status);
+        self::assertTrue($decoded['incomplete']);
+        self::assertCount(1, $decoded['diagnostics']);
+        self::assertSame('Broken.php', $decoded['diagnostics'][0]['file']);
     }
 
     private function fixtureRoot(): string
     {
         return dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast';
+    }
+
+    private function temporaryDirectory(): string
+    {
+        $directory = sys_get_temp_dir() . '/agent-kit-cli-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0777, true);
+        $this->temporaryDirectories[] = $directory;
+
+        return $directory;
     }
 }
