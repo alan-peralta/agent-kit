@@ -8,6 +8,7 @@ use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
 use Peralta\AgentKit\Refactoring\Agents\InstallationResult;
 use RuntimeException;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 
 final class InstallAgentsCommand extends Command
 {
@@ -32,9 +33,8 @@ final class InstallAgentsCommand extends Command
             }
 
             $this->validateAgents($agents, $registry);
-            $path = $this->option('path');
             $result = $installer->install(
-                is_string($path) && $path !== '' ? $path : base_path(),
+                $this->projectRoot(),
                 $agents,
                 (bool) $this->option('force'),
             );
@@ -43,7 +43,7 @@ final class InstallAgentsCommand extends Command
 
             return $result->successful() ? self::SUCCESS : self::FAILURE;
         } catch (InvalidArgumentException | RuntimeException $exception) {
-            $this->error($exception->getMessage());
+            $this->error(OutputFormatter::escape($exception->getMessage()));
 
             return self::FAILURE;
         }
@@ -52,13 +52,19 @@ final class InstallAgentsCommand extends Command
     /** @return list<string> */
     private function selectedAgents(AgentAdapterRegistry $registry): array
     {
+        $agents = $this->argument('agents');
+        $agents = is_array($agents) ? array_values($agents) : [];
+
         if ((bool) $this->option('all')) {
+            if ($agents !== []) {
+                throw new InvalidArgumentException('Do not combine --all with positional coding agents.');
+            }
+
             return $registry->ids();
         }
 
-        $agents = $this->argument('agents');
-        if (is_array($agents) && $agents !== []) {
-            return array_values($agents);
+        if ($agents !== []) {
+            return $agents;
         }
 
         if (!$this->input->isInteractive()) {
@@ -74,6 +80,22 @@ final class InstallAgentsCommand extends Command
         );
 
         return is_array($selected) ? array_values($selected) : [$selected];
+    }
+
+    private function projectRoot(): string
+    {
+        if (!$this->input->hasParameterOption('--path', true)) {
+            return base_path();
+        }
+
+        $path = $this->option('path');
+        if (!is_string($path) || trim($path) === '') {
+            throw new InvalidArgumentException(
+                'The --path option requires a project root. Use --path=/project.',
+            );
+        }
+
+        return $path;
     }
 
     /** @param list<string> $agents */
@@ -94,19 +116,19 @@ final class InstallAgentsCommand extends Command
     private function renderResult(InstallationResult $result): void
     {
         foreach ($result->created as $path) {
-            $this->line("CREATED {$path}");
+            $this->line('CREATED ' . OutputFormatter::escape($path));
         }
 
         foreach ($result->unchanged as $path) {
-            $this->line("UNCHANGED {$path}");
+            $this->line('UNCHANGED ' . OutputFormatter::escape($path));
         }
 
         foreach ($result->overwritten as $path) {
-            $this->line("OVERWRITTEN {$path}");
+            $this->line('OVERWRITTEN ' . OutputFormatter::escape($path));
         }
 
         foreach ($result->conflicts as $path) {
-            $this->line("CONFLICTS {$path}");
+            $this->line('CONFLICTS ' . OutputFormatter::escape($path));
         }
     }
 }

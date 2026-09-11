@@ -57,12 +57,11 @@ final class InstallAgentsCommandTest extends TestCase
         self::assertSame(7, substr_count(Artisan::output(), 'CREATED '));
     }
 
-    public function test_all_installs_both_adapters_and_takes_precedence_over_positional_agents(): void
+    public function test_all_installs_both_adapters(): void
     {
         $root = $this->temporaryDirectory();
 
         $status = Artisan::call('agent-kit:agents:install', [
-            'agents' => ['unsupported-but-ignored'],
             '--all' => true,
             '--path' => $root,
         ]);
@@ -72,6 +71,21 @@ final class InstallAgentsCommandTest extends TestCase
         self::assertFileExists($root . '/.cursor/rules/agent-kit-refactoring.mdc');
         self::assertFileExists($root . '/.claude/rules/agent-kit-refactoring.md');
         self::assertSame(14, substr_count(Artisan::output(), 'CREATED '));
+    }
+
+    public function test_all_rejects_positional_agents_instead_of_ignoring_them(): void
+    {
+        $root = $this->temporaryDirectory();
+
+        $status = Artisan::call('agent-kit:agents:install', [
+            'agents' => ['unknown-agent'],
+            '--all' => true,
+            '--path' => $root,
+        ]);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString('Do not combine --all with positional coding agents.', Artisan::output());
+        self::assertSame([], $this->files($root));
     }
 
     public function test_conflict_returns_failure_preserves_custom_content_and_creates_missing_files(): void
@@ -152,6 +166,72 @@ final class InstallAgentsCommandTest extends TestCase
 
         self::assertSame(1, $status);
         self::assertStringContainsString("Project root is not an existing directory: {$root}", Artisan::output());
+    }
+
+    public function test_explicit_empty_or_whitespace_path_is_rejected_before_writing(): void
+    {
+        foreach ([null, '', '   '] as $path) {
+            $fallbackRoot = $this->temporaryDirectory();
+            $this->app->setBasePath($fallbackRoot);
+
+            $status = Artisan::call('agent-kit:agents:install', [
+                'agents' => ['cursor'],
+                '--path' => $path,
+            ]);
+
+            self::assertSame(1, $status);
+            self::assertStringContainsString(
+                'The --path option requires a project root. Use --path=/project.',
+                Artisan::output(),
+            );
+            self::assertSame([], $this->files($fallbackRoot));
+        }
+    }
+
+    public function test_absent_path_defaults_to_the_application_base_path(): void
+    {
+        $root = $this->temporaryDirectory();
+        $this->app->setBasePath($root);
+
+        $status = Artisan::call('agent-kit:agents:install', [
+            'agents' => ['cursor'],
+        ]);
+
+        self::assertSame(0, $status);
+        self::assertCount(7, $this->files($root));
+    }
+
+    public function test_markup_in_an_unknown_agent_is_rendered_literally(): void
+    {
+        $root = $this->temporaryDirectory();
+
+        $status = Artisan::call('agent-kit:agents:install', [
+            'agents' => ['<info>cursor</info>'],
+            '--path' => $root,
+        ]);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString(
+            'Unsupported coding agent: <info>cursor</info>',
+            Artisan::output(),
+        );
+        self::assertSame([], $this->files($root));
+    }
+
+    public function test_markup_in_an_invalid_path_is_rendered_literally(): void
+    {
+        $root = $this->temporaryDirectory() . '/<info>missing</info>';
+
+        $status = Artisan::call('agent-kit:agents:install', [
+            'agents' => ['cursor'],
+            '--path' => $root,
+        ]);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString(
+            "Project root is not an existing directory: {$root}",
+            Artisan::output(),
+        );
     }
 
     public function test_non_interactive_invocation_without_agents_fails_clearly(): void
