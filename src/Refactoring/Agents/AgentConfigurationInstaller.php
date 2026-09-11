@@ -8,10 +8,10 @@ use RuntimeException;
 /**
  * Installs generated files into a project tree that is trusted against hostile concurrent renames.
  *
- * Destination symlinks are never followed. Parent symlinks that resolve outside the root are
- * rejected; broken symlinks whose lexical target stays inside the root are content conflicts.
- * Parent containment is revalidated around publication, but PHP does not expose portable
- * openat(2) primitives needed to resist an adversary mutating the tree concurrently.
+ * Destination symlinks are never followed. Broken parent symlinks are structural conflicts;
+ * resolved parent symlinks that escape the root are rejected. Parent containment is revalidated
+ * around publication, but PHP does not expose portable openat(2) primitives needed to resist an
+ * adversary mutating the tree concurrently.
  */
 final class AgentConfigurationInstaller
 {
@@ -190,10 +190,6 @@ final class AgentConfigurationInstaller
                 $canonical = realpath($current);
 
                 if ($canonical === false) {
-                    if (!$this->brokenSymlinkTargetsWithinRoot($root, $current)) {
-                        throw new RuntimeException("Generated agent path escapes project root through symlink: {$relativePath}");
-                    }
-
                     return false;
                 }
 
@@ -220,60 +216,6 @@ final class AgentConfigurationInstaller
         }
 
         return true;
-    }
-
-    private function brokenSymlinkTargetsWithinRoot(string $root, string $link): bool
-    {
-        $target = readlink($link);
-        if ($target === false || $target === '') {
-            return false;
-        }
-
-        $candidate = str_starts_with($target, '/')
-            ? $target
-            : dirname($link) . '/' . $target;
-        $candidate = $this->normalizeAbsolutePath($candidate);
-        $probe = $candidate;
-        $suffix = [];
-
-        while (!file_exists($probe) && !is_link($probe)) {
-            $parent = dirname($probe);
-            if ($parent === $probe) {
-                return false;
-            }
-
-            array_unshift($suffix, basename($probe));
-            $probe = $parent;
-        }
-
-        $canonical = realpath($probe);
-        if ($canonical === false) {
-            return false;
-        }
-
-        $candidate = $this->normalizeAbsolutePath(
-            str_replace('\\', '/', $canonical) . ($suffix === [] ? '' : '/' . implode('/', $suffix)),
-        );
-
-        return $this->isWithinRoot($root, $candidate);
-    }
-
-    private function normalizeAbsolutePath(string $path): string
-    {
-        $segments = [];
-
-        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
-            if ($segment === '' || $segment === '.') {
-                continue;
-            }
-            if ($segment === '..') {
-                array_pop($segments);
-                continue;
-            }
-            $segments[] = $segment;
-        }
-
-        return '/' . implode('/', $segments);
     }
 
     private function isWithinRoot(string $root, string $path): bool

@@ -254,6 +254,25 @@ final class AgentConfigurationInstallerTest extends TestCase
         self::assertTrue(is_link($root . '/broken'));
     }
 
+    public function test_broken_parent_symlink_with_an_outside_target_is_a_conflict(): void
+    {
+        $root = $this->temporaryDirectory();
+        $outside = $this->temporaryDirectory();
+        symlink($outside . '/missing', $root . '/broken');
+        $adapter = self::adapter('safe', [
+            new GeneratedAgentFile('broken/file.md', 'payload'),
+            new GeneratedAgentFile('later/file.md', 'created'),
+        ]);
+
+        $result = $this->installer([$adapter])->install($root, ['safe']);
+
+        self::assertSame(['later/file.md'], $result->created);
+        self::assertSame(['broken/file.md'], $result->conflicts);
+        self::assertTrue(is_link($root . '/broken'));
+        self::assertSame($outside . '/missing', readlink($root . '/broken'));
+        self::assertSame('created', file_get_contents($root . '/later/file.md'));
+    }
+
     public function test_project_root_itself_may_be_a_symlink_and_is_canonicalized_once(): void
     {
         $root = $this->temporaryDirectory();
