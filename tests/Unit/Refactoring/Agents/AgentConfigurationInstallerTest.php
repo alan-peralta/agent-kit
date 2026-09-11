@@ -7,6 +7,7 @@ use Peralta\AgentKit\Refactoring\Agents\AgentAdapter;
 use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
 use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
+use Peralta\AgentKit\Refactoring\Agents\AgentInstallationFilesystem;
 use Peralta\AgentKit\Refactoring\Agents\AgentTemplateRenderer;
 use Peralta\AgentKit\Refactoring\Agents\ClaudeCodeAgentAdapter;
 use Peralta\AgentKit\Refactoring\Agents\CursorAgentAdapter;
@@ -170,7 +171,32 @@ final class AgentConfigurationInstallerTest extends TestCase
             'dot segment' => ['safe/./file'],
             'duplicate separator' => ['safe//file'],
             'nul' => ["safe/file\0.md"],
+            'non ascii' => ['safe/café.md'],
+            'colon' => ['safe/name:stream.md'],
+            'trailing dot' => ['safe/name./file.md'],
+            'trailing space' => ['safe/name /file.md'],
+            'windows con' => ['safe/CON.md'],
+            'windows com device' => ['safe/com1/file.md'],
         ];
+    }
+
+    public function test_portable_case_aliases_are_rejected_before_writing(): void
+    {
+        $root = $this->temporaryDirectory();
+        $adapter = self::adapter('alias', [
+            new GeneratedAgentFile('Safe/File.md', 'same'),
+            new GeneratedAgentFile('safe/file.md', 'same'),
+        ]);
+
+        try {
+            $this->installer([$adapter])->install($root, ['alias']);
+            self::fail('Portable path aliases were accepted.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertSame('Generated agent path collision: Safe/File.md and safe/file.md', $exception->getMessage());
+        }
+
+        self::assertDirectoryDoesNotExist($root . '/Safe');
+        self::assertDirectoryDoesNotExist($root . '/safe');
     }
 
     public function test_identical_duplicate_destinations_are_processed_once(): void
@@ -212,6 +238,17 @@ final class AgentConfigurationInstallerTest extends TestCase
         $this->installer([$adapter])->install($root, ['evil']);
     }
 
+    public function test_broken_parent_symlink_is_rejected_without_writing(): void
+    {
+        $root = $this->temporaryDirectory();
+        symlink($root . '/missing', $root . '/broken');
+        $adapter = self::adapter('evil', [new GeneratedAgentFile('broken/file.md', 'payload')]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Generated agent parent is not a directory: broken/file.md');
+        $this->installer([$adapter])->install($root, ['evil']);
+    }
+
     public function test_project_root_itself_may_be_a_symlink_and_is_canonicalized_once(): void
     {
         $root = $this->temporaryDirectory();
@@ -241,9 +278,125 @@ final class AgentConfigurationInstallerTest extends TestCase
         self::assertSame(['safe/file.md'], $result->conflicts);
         self::assertSame('outside', file_get_contents($outsideFile));
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Refusing to overwrite generated agent symlink: safe/file.md');
-        $this->installer([$adapter])->install($root, ['safe'], true);
+        $forced = $this->installer([$adapter])->install($root, ['safe'], true);
+
+        self::assertSame(['safe/file.md'], $forced->conflicts);
+        self::assertSame('outside', file_get_contents($outsideFile));
+    }
+
+    public function test_non_regular_targets_are_conflicts_and_do_not_stop_later_creations(): void
+    {
+        $root = $this->temporaryDirectory();
+        mkdir($root . '/blocked');
+        mkdir($root . '/blocked/file.md');
+        $adapter = self::adapter('safe', [
+            new GeneratedAgentFile('blocked/file.md', 'replacement'),
+            new GeneratedAgentFile('later/file.md', 'created'),
+        ]);
+
+        $result = $this->installer([$adapter])->install($root, ['safe'], true);
+
+        self::assertSame(['later/file.md'], $result->created);
+        self::assertSame(['blocked/file.md'], $result->conflicts);
+        self::assertDirectoryExists($root . '/blocked/file.md');
+        self::assertSame('created', file_get_contents($root . '/later/file.md'));
+    }
+
+    public function test_unreadable_target_is_a_conflict_and_does_not_stop_later_creations(): void
+    {
+        $root = $this->temporaryDirectory();
+        mkdir($root . '/blocked');
+        file_put_contents($root . '/blocked/file.md', 'private');
+        chmod($root . '/blocked/file.md', 0000);
+
+        if (is_readable($root . '/blocked/file.md')) {
+            chmod($root . '/blocked/file.md', 0600);
+            self::markTestSkipped('This platform/user can read mode-000 files.');
+        }
+
+        $adapter = self::adapter('safe', [
+            new GeneratedAgentFile('blocked/file.md', 'replacement'),
+            new GeneratedAgentFile('later/file.md', 'created'),
+        ]);
+
+        try {
+            $result = $this->installer([$adapter])->install($root, ['safe'], true);
+        } finally {
+            chmod($root . '/blocked/file.md', 0600);
+        }
+
+        self::assertSame(['later/file.md'], $result->created);
+        self::assertSame(['blocked/file.md'], $result->conflicts);
+        self::assertSame('private', file_get_contents($root . '/blocked/file.md'));
+    }
+
+    public function test_lost_create_race_never_overwrites_the_competing_file(): void
+    {
+        $root = $this->temporaryDirectory();
+        $adapter = self::adapter('safe', [
+            new GeneratedAgentFile('race/file.md', 'generated'),
+            new GeneratedAgentFile('later/file.md', 'created'),
+        ]);
+        $filesystem = new class implements AgentInstallationFilesystem
+        {
+            private bool $raced = false;
+
+            public function link(string $temporary, string $target): bool
+            {
+                if (!$this->raced) {
+                    $this->raced = true;
+                    file_put_contents($target, 'competing');
+
+                    return false;
+                }
+
+                return link($temporary, $target);
+            }
+
+            public function rename(string $from, string $to): bool
+            {
+                return rename($from, $to);
+            }
+
+            public function unlink(string $path): bool
+            {
+                return unlink($path);
+            }
+
+            public function requiresBackupForOverwrite(): bool
+            {
+                return false;
+            }
+        };
+
+        $result = $this->installer([$adapter], $filesystem)->install($root, ['safe']);
+
+        self::assertSame(['later/file.md'], $result->created);
+        self::assertSame(['race/file.md'], $result->conflicts);
+        self::assertSame('competing', file_get_contents($root . '/race/file.md'));
+    }
+
+    public function test_exclusive_publish_failure_without_a_competing_target_aborts_and_cleans_up(): void
+    {
+        $root = $this->temporaryDirectory();
+        $adapter = self::adapter('safe', [new GeneratedAgentFile('safe/file.md', 'generated')]);
+        $filesystem = new class implements AgentInstallationFilesystem
+        {
+            public function link(string $temporary, string $target): bool { return false; }
+            public function rename(string $from, string $to): bool { return rename($from, $to); }
+            public function unlink(string $path): bool { return unlink($path); }
+            public function requiresBackupForOverwrite(): bool { return false; }
+        };
+
+        try {
+            $this->installer([$adapter], $filesystem)->install($root, ['safe']);
+            self::fail('A filesystem publish failure was reported as a content conflict.');
+        } catch (RuntimeException $exception) {
+            self::assertSame('Could not create agent file: safe/file.md', $exception->getMessage());
+        }
+
+        self::assertFileDoesNotExist($root . '/safe/file.md');
+        self::assertSame([], glob($root . '/safe/file.md.agent-kit-*') ?: []);
     }
 
     public function test_failed_atomic_overwrite_preserves_original_and_cleans_temporary_file(): void
@@ -252,12 +405,14 @@ final class AgentConfigurationInstallerTest extends TestCase
         mkdir($root . '/safe');
         file_put_contents($root . '/safe/file.md', 'original');
         $adapter = self::adapter('safe', [new GeneratedAgentFile('safe/file.md', 'replacement')]);
-        $installer = new AgentConfigurationInstaller(
-            new AgentAdapterRegistry([$adapter]),
-            new AgentCommandRepository(dirname(__DIR__, 4) . '/resources/agents/refactoring'),
-            new AgentTemplateRenderer(),
-            static fn (string $temporary, string $target): bool => false,
-        );
+        $filesystem = new class implements AgentInstallationFilesystem
+        {
+            public function link(string $temporary, string $target): bool { return link($temporary, $target); }
+            public function rename(string $from, string $to): bool { return false; }
+            public function unlink(string $path): bool { return unlink($path); }
+            public function requiresBackupForOverwrite(): bool { return false; }
+        };
+        $installer = $this->installer([$adapter], $filesystem);
 
         try {
             $installer->install($root, ['safe'], true);
@@ -270,13 +425,55 @@ final class AgentConfigurationInstallerTest extends TestCase
         self::assertSame([], glob($root . '/safe/file.md.agent-kit-*') ?: []);
     }
 
+    public function test_windows_backup_cleanup_failure_is_reported_with_recovery_path(): void
+    {
+        $root = $this->temporaryDirectory();
+        mkdir($root . '/safe');
+        file_put_contents($root . '/safe/file.md', 'original');
+        $adapter = self::adapter('safe', [new GeneratedAgentFile('safe/file.md', 'replacement')]);
+        $filesystem = new class implements AgentInstallationFilesystem
+        {
+            private int $renames = 0;
+
+            public function link(string $temporary, string $target): bool { return link($temporary, $target); }
+
+            public function rename(string $from, string $to): bool
+            {
+                $this->renames++;
+
+                return $this->renames === 1 ? false : rename($from, $to);
+            }
+
+            public function unlink(string $path): bool
+            {
+                return !str_contains($path, '.agent-kit-backup-') && unlink($path);
+            }
+
+            public function requiresBackupForOverwrite(): bool { return true; }
+        };
+
+        try {
+            $this->installer([$adapter], $filesystem)->install($root, ['safe'], true);
+            self::fail('Backup cleanup failure was ignored.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('Could not remove agent backup after install:', $exception->getMessage());
+            self::assertStringContainsString('safe/file.md.agent-kit-backup-', $exception->getMessage());
+        }
+
+        self::assertSame('replacement', file_get_contents($root . '/safe/file.md'));
+        $backups = glob($root . '/safe/file.md.agent-kit-backup-*') ?: [];
+        self::assertCount(1, $backups);
+        self::assertSame('original', file_get_contents($backups[0]));
+    }
+
     /** @param list<AgentAdapter>|null $adapters */
-    private function installer(?array $adapters = null): AgentConfigurationInstaller
+    private function installer(?array $adapters = null, ?AgentInstallationFilesystem $filesystem = null): AgentConfigurationInstaller
     {
         return new AgentConfigurationInstaller(
             new AgentAdapterRegistry($adapters ?? [new CursorAgentAdapter(), new ClaudeCodeAgentAdapter()]),
             new AgentCommandRepository(dirname(__DIR__, 4) . '/resources/agents/refactoring'),
             new AgentTemplateRenderer(),
+            $filesystem,
         );
     }
 

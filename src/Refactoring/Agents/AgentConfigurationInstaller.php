@@ -2,18 +2,23 @@
 
 namespace Peralta\AgentKit\Refactoring\Agents;
 
-use Closure;
 use InvalidArgumentException;
 use RuntimeException;
 
+/**
+ * Installs generated files into a project tree that is trusted against hostile concurrent renames.
+ *
+ * Existing and broken symlinks are checked without following destination symlinks. Parent
+ * containment is revalidated around publication, but PHP does not expose portable openat(2)
+ * primitives needed to make traversal safe against an adversary mutating the tree concurrently.
+ */
 final class AgentConfigurationInstaller
 {
-    /** @param null|Closure(string, string): bool $rename */
     public function __construct(
         private readonly AgentAdapterRegistry $registry,
         private readonly AgentCommandRepository $repository,
         private readonly AgentTemplateRenderer $renderer,
-        private readonly ?Closure $rename = null,
+        private readonly ?AgentInstallationFilesystem $filesystem = null,
     ) {}
 
     /** @param list<string> $agentIds */
@@ -31,22 +36,20 @@ final class AgentConfigurationInstaller
             $this->assertContainedAncestors($root, $path);
 
             if (is_link($target)) {
-                if ($force) {
-                    throw new RuntimeException("Refusing to overwrite generated agent symlink: {$path}");
-                }
-
                 $conflicts[] = $path;
                 continue;
             }
 
             if (file_exists($target)) {
                 if (!is_file($target) || !is_readable($target)) {
-                    throw new RuntimeException("Unable to read existing agent file: {$path}");
+                    $conflicts[] = $path;
+                    continue;
                 }
 
                 $existing = @file_get_contents($target);
                 if ($existing === false) {
-                    throw new RuntimeException("Unable to read existing agent file: {$path}");
+                    $conflicts[] = $path;
+                    continue;
                 }
 
                 if ($existing === $content) {
@@ -64,8 +67,14 @@ final class AgentConfigurationInstaller
                 continue;
             }
 
-            $this->writeAtomically($root, $path, $content);
-            $created[] = $path;
+            $status = $this->createAtomically($root, $path, $content);
+            if ($status === 'created') {
+                $created[] = $path;
+            } elseif ($status === 'unchanged') {
+                $unchanged[] = $path;
+            } else {
+                $conflicts[] = $path;
+            }
         }
 
         return new InstallationResult($created, $unchanged, $conflicts, $overwritten);
@@ -92,12 +101,20 @@ final class AgentConfigurationInstaller
     private function artifacts(array $agentIds): array
     {
         $artifacts = [];
+        $identities = [];
 
         foreach ($agentIds as $id) {
             foreach ($this->registry->get($id)->generate($this->repository, $this->renderer) as $file) {
                 $path = $this->normalizePath($file->path);
+                $identity = strtolower($path);
 
-                if (isset($artifacts[$path])) {
+                if (isset($identities[$identity])) {
+                    $existingPath = $identities[$identity];
+
+                    if ($existingPath !== $path) {
+                        throw new InvalidArgumentException("Generated agent path collision: {$existingPath} and {$path}");
+                    }
+
                     if ($artifacts[$path] !== $file->content) {
                         throw new InvalidArgumentException("Generated agent path collision: {$path}");
                     }
@@ -106,6 +123,7 @@ final class AgentConfigurationInstaller
                 }
 
                 $artifacts[$path] = $file->content;
+                $identities[$identity] = $path;
             }
         }
 
@@ -122,14 +140,33 @@ final class AgentConfigurationInstaller
             || str_contains($path, "\0")
             || str_starts_with($normalized, '/')
             || preg_match('/^[A-Za-z]:/', $normalized) === 1
+            || preg_match('/\A[A-Za-z0-9._\/-]+\z/D', $normalized) !== 1
             || in_array('', $segments, true)
             || in_array('.', $segments, true)
             || in_array('..', $segments, true)
+            || $this->hasWindowsReservedSegment($segments)
         ) {
             throw new InvalidArgumentException("Unsafe generated agent path: {$path}");
         }
 
         return $normalized;
+    }
+
+    /** @param list<string> $segments */
+    private function hasWindowsReservedSegment(array $segments): bool
+    {
+        foreach ($segments as $segment) {
+            if (str_ends_with($segment, '.') || str_ends_with($segment, ' ')) {
+                return true;
+            }
+
+            $basename = strtoupper(explode('.', $segment, 2)[0]);
+            if (preg_match('/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/', $basename) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function assertContainedAncestors(string $root, string $relativePath): void
@@ -173,79 +210,95 @@ final class AgentConfigurationInstaller
 
         $permissions = is_file($target) ? @fileperms($target) : false;
         $mode = $permissions !== false ? $permissions & 0777 : null;
-        [$handle, $temporary] = $this->openTemporaryFile($target, $relativePath);
+        $temporary = $this->writeTemporaryFile($target, $relativePath, $content, $mode);
 
         try {
-            if (!flock($handle, LOCK_EX)) {
-                throw new RuntimeException("Could not lock temporary agent file: {$relativePath}");
-            }
-
-            $remaining = $content;
-            while ($remaining !== '') {
-                $written = fwrite($handle, $remaining);
-                if ($written === false || $written === 0) {
-                    throw new RuntimeException("Could not write temporary agent file: {$relativePath}");
-                }
-                $remaining = substr($remaining, $written);
-            }
-
-            if (!fflush($handle)) {
-                throw new RuntimeException("Could not flush temporary agent file: {$relativePath}");
-            }
-
-            if ($mode !== null && !chmod($temporary, $mode)) {
-                throw new RuntimeException("Could not preserve agent file permissions: {$relativePath}");
-            }
-
-            flock($handle, LOCK_UN);
-            fclose($handle);
-            $handle = null;
-
+            $this->assertContainedAncestors($root, $relativePath);
             if (!$this->replaceTarget($temporary, $target, $relativePath)) {
                 throw new RuntimeException("Could not install agent file: {$relativePath}");
             }
         } finally {
-            if (is_resource($handle)) {
-                flock($handle, LOCK_UN);
-                fclose($handle);
+            if (file_exists($temporary) || is_link($temporary)) {
+                if (!$this->unlink($temporary)) {
+                    throw new RuntimeException("Could not remove temporary agent file: {$temporary}");
+                }
+            }
+        }
+    }
+
+    /** @return 'created'|'unchanged'|'conflict' */
+    private function createAtomically(string $root, string $relativePath, string $content): string
+    {
+        $target = $root . '/' . $relativePath;
+        $this->createDirectory($root, $relativePath);
+        $this->assertContainedAncestors($root, $relativePath);
+        $temporary = $this->writeTemporaryFile($target, $relativePath, $content, null);
+
+        try {
+            $this->assertContainedAncestors($root, $relativePath);
+
+            if ($this->link($temporary, $target)) {
+                return 'created';
             }
 
-            if (file_exists($temporary) || is_link($temporary)) {
-                @unlink($temporary);
+            if (!file_exists($target) && !is_link($target)) {
+                throw new RuntimeException("Could not create agent file: {$relativePath}");
+            }
+
+            if (is_link($target) || !is_file($target) || !is_readable($target)) {
+                return 'conflict';
+            }
+
+            $existing = @file_get_contents($target);
+
+            return $existing !== false && $existing === $content ? 'unchanged' : 'conflict';
+        } finally {
+            if ((file_exists($temporary) || is_link($temporary)) && !$this->unlink($temporary)) {
+                throw new RuntimeException("Could not remove temporary agent file: {$temporary}");
             }
         }
     }
 
     private function replaceTarget(string $temporary, string $target, string $relativePath): bool
     {
-        if ($this->rename !== null) {
-            return ($this->rename)($temporary, $target);
-        }
-
-        if (@rename($temporary, $target)) {
+        if ($this->rename($temporary, $target)) {
             return true;
         }
 
-        if (DIRECTORY_SEPARATOR !== '\\' || !is_file($target)) {
+        if (!$this->requiresBackupForOverwrite() || !is_file($target)) {
             return false;
         }
 
-        $backup = $target . '.agent-kit-backup-' . bin2hex(random_bytes(8));
-        if (!@rename($target, $backup)) {
+        $backup = $this->unusedBackupPath($target);
+        if (!$this->rename($target, $backup)) {
             return false;
         }
 
-        if (@rename($temporary, $target)) {
-            @unlink($backup);
+        if ($this->rename($temporary, $target)) {
+            if (!$this->unlink($backup)) {
+                throw new RuntimeException("Could not remove agent backup after install: {$backup}");
+            }
 
             return true;
         }
 
-        if (!@rename($backup, $target)) {
-            throw new RuntimeException("Could not restore agent file after failed install: {$relativePath}");
+        if (!$this->rename($backup, $target)) {
+            throw new RuntimeException("Could not restore agent file after failed install; recovery file: {$backup}");
         }
 
         return false;
+    }
+
+    private function unusedBackupPath(string $target): string
+    {
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $backup = $target . '.agent-kit-backup-' . bin2hex(random_bytes(8));
+            if (!file_exists($backup) && !is_link($backup)) {
+                return $backup;
+            }
+        }
+
+        throw new RuntimeException("Could not reserve agent backup path: {$target}");
     }
 
     private function createDirectory(string $root, string $relativePath): void
@@ -273,6 +326,49 @@ final class AgentConfigurationInstaller
         }
     }
 
+    private function writeTemporaryFile(string $target, string $relativePath, string $content, ?int $mode): string
+    {
+        [$handle, $temporary] = $this->openTemporaryFile($target, $relativePath);
+
+        try {
+            if (!flock($handle, LOCK_EX)) {
+                throw new RuntimeException("Could not lock temporary agent file: {$relativePath}");
+            }
+
+            $remaining = $content;
+            while ($remaining !== '') {
+                $written = fwrite($handle, $remaining);
+                if ($written === false || $written === 0) {
+                    throw new RuntimeException("Could not write temporary agent file: {$relativePath}");
+                }
+                $remaining = substr($remaining, $written);
+            }
+
+            if (!fflush($handle)) {
+                throw new RuntimeException("Could not flush temporary agent file: {$relativePath}");
+            }
+
+            if ($mode !== null && !chmod($temporary, $mode)) {
+                throw new RuntimeException("Could not preserve agent file permissions: {$relativePath}");
+            }
+
+            flock($handle, LOCK_UN);
+            fclose($handle);
+
+            return $temporary;
+        } catch (\Throwable $exception) {
+            if (is_resource($handle)) {
+                flock($handle, LOCK_UN);
+                fclose($handle);
+            }
+            if ((file_exists($temporary) || is_link($temporary)) && !$this->unlink($temporary)) {
+                throw new RuntimeException("Could not remove temporary agent file: {$temporary}", 0, $exception);
+            }
+
+            throw $exception;
+        }
+    }
+
     /** @return array{0: resource, 1: string} */
     private function openTemporaryFile(string $target, string $relativePath): array
     {
@@ -292,5 +388,33 @@ final class AgentConfigurationInstaller
         }
 
         throw new RuntimeException("Could not create temporary agent file: {$relativePath}");
+    }
+
+    private function link(string $temporary, string $target): bool
+    {
+        return $this->filesystem !== null
+            ? $this->filesystem->link($temporary, $target)
+            : @link($temporary, $target);
+    }
+
+    private function rename(string $from, string $to): bool
+    {
+        return $this->filesystem !== null
+            ? $this->filesystem->rename($from, $to)
+            : @rename($from, $to);
+    }
+
+    private function unlink(string $path): bool
+    {
+        return $this->filesystem !== null
+            ? $this->filesystem->unlink($path)
+            : @unlink($path);
+    }
+
+    private function requiresBackupForOverwrite(): bool
+    {
+        return $this->filesystem !== null
+            ? $this->filesystem->requiresBackupForOverwrite()
+            : DIRECTORY_SEPARATOR === '\\';
     }
 }
