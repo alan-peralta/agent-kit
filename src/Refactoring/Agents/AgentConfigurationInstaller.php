@@ -8,9 +8,10 @@ use RuntimeException;
 /**
  * Installs generated files into a project tree that is trusted against hostile concurrent renames.
  *
- * Existing and broken symlinks are checked without following destination symlinks. Parent
- * containment is revalidated around publication, but PHP does not expose portable openat(2)
- * primitives needed to make traversal safe against an adversary mutating the tree concurrently.
+ * Destination symlinks are never followed. Parent symlinks that resolve outside the root are
+ * rejected; broken symlinks whose lexical target stays inside the root are content conflicts.
+ * Parent containment is revalidated around publication, but PHP does not expose portable
+ * openat(2) primitives needed to resist an adversary mutating the tree concurrently.
  */
 final class AgentConfigurationInstaller
 {
@@ -33,7 +34,10 @@ final class AgentConfigurationInstaller
 
         foreach ($artifacts as $path => $content) {
             $target = $root . '/' . $path;
-            $this->assertContainedAncestors($root, $path);
+            if (!$this->parentPathIsUsable($root, $path)) {
+                $conflicts[] = $path;
+                continue;
+            }
 
             if (is_link($target)) {
                 $conflicts[] = $path;
@@ -169,7 +173,7 @@ final class AgentConfigurationInstaller
         return false;
     }
 
-    private function assertContainedAncestors(string $root, string $relativePath): void
+    private function parentPathIsUsable(string $root, string $relativePath): bool
     {
         $segments = explode('/', $relativePath);
         array_pop($segments);
@@ -182,8 +186,31 @@ final class AgentConfigurationInstaller
                 break;
             }
 
+            if (is_link($current)) {
+                $canonical = realpath($current);
+
+                if ($canonical === false) {
+                    if (!$this->brokenSymlinkTargetsWithinRoot($root, $current)) {
+                        throw new RuntimeException("Generated agent path escapes project root through symlink: {$relativePath}");
+                    }
+
+                    return false;
+                }
+
+                $canonical = str_replace('\\', '/', $canonical);
+                if (!$this->isWithinRoot($root, $canonical)) {
+                    throw new RuntimeException("Generated agent path escapes project root through symlink: {$relativePath}");
+                }
+
+                if (!is_dir($current)) {
+                    throw new RuntimeException("Generated agent parent symlink is not a directory: {$relativePath}");
+                }
+
+                continue;
+            }
+
             if (!is_dir($current)) {
-                throw new RuntimeException("Generated agent parent is not a directory: {$relativePath}");
+                return false;
             }
 
             $canonical = realpath($current);
@@ -191,6 +218,62 @@ final class AgentConfigurationInstaller
                 throw new RuntimeException("Generated agent path escapes project root through symlink: {$relativePath}");
             }
         }
+
+        return true;
+    }
+
+    private function brokenSymlinkTargetsWithinRoot(string $root, string $link): bool
+    {
+        $target = readlink($link);
+        if ($target === false || $target === '') {
+            return false;
+        }
+
+        $candidate = str_starts_with($target, '/')
+            ? $target
+            : dirname($link) . '/' . $target;
+        $candidate = $this->normalizeAbsolutePath($candidate);
+        $probe = $candidate;
+        $suffix = [];
+
+        while (!file_exists($probe) && !is_link($probe)) {
+            $parent = dirname($probe);
+            if ($parent === $probe) {
+                return false;
+            }
+
+            array_unshift($suffix, basename($probe));
+            $probe = $parent;
+        }
+
+        $canonical = realpath($probe);
+        if ($canonical === false) {
+            return false;
+        }
+
+        $candidate = $this->normalizeAbsolutePath(
+            str_replace('\\', '/', $canonical) . ($suffix === [] ? '' : '/' . implode('/', $suffix)),
+        );
+
+        return $this->isWithinRoot($root, $candidate);
+    }
+
+    private function normalizeAbsolutePath(string $path): string
+    {
+        $segments = [];
+
+        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                array_pop($segments);
+                continue;
+            }
+            $segments[] = $segment;
+        }
+
+        return '/' . implode('/', $segments);
     }
 
     private function isWithinRoot(string $root, string $path): bool
@@ -202,7 +285,9 @@ final class AgentConfigurationInstaller
     {
         $target = $root . '/' . $relativePath;
         $this->createDirectory($root, $relativePath);
-        $this->assertContainedAncestors($root, $relativePath);
+        if (!$this->parentPathIsUsable($root, $relativePath)) {
+            throw new RuntimeException("Generated agent parent is not a directory: {$relativePath}");
+        }
 
         if (is_link($target)) {
             throw new RuntimeException("Refusing to overwrite generated agent symlink: {$relativePath}");
@@ -213,7 +298,9 @@ final class AgentConfigurationInstaller
         $temporary = $this->writeTemporaryFile($target, $relativePath, $content, $mode);
 
         try {
-            $this->assertContainedAncestors($root, $relativePath);
+            if (!$this->parentPathIsUsable($root, $relativePath)) {
+                throw new RuntimeException("Generated agent parent is not a directory: {$relativePath}");
+            }
             if (!$this->replaceTarget($temporary, $target, $relativePath)) {
                 throw new RuntimeException("Could not install agent file: {$relativePath}");
             }
@@ -231,11 +318,15 @@ final class AgentConfigurationInstaller
     {
         $target = $root . '/' . $relativePath;
         $this->createDirectory($root, $relativePath);
-        $this->assertContainedAncestors($root, $relativePath);
+        if (!$this->parentPathIsUsable($root, $relativePath)) {
+            throw new RuntimeException("Generated agent parent is not a directory: {$relativePath}");
+        }
         $temporary = $this->writeTemporaryFile($target, $relativePath, $content, null);
 
         try {
-            $this->assertContainedAncestors($root, $relativePath);
+            if (!$this->parentPathIsUsable($root, $relativePath)) {
+                throw new RuntimeException("Generated agent parent is not a directory: {$relativePath}");
+            }
 
             if ($this->link($temporary, $target)) {
                 return 'created';
