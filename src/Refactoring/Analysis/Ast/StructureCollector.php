@@ -22,6 +22,8 @@ final class StructureCollector extends NodeVisitorAbstract
     private ?array $symbol = null;
     private array $propertyTypes = [];
     private array $localTypes = [];
+    private array $localScopeStack = [];
+    private array $conditionalScopes = [];
     private readonly NameContext $nameContext;
 
     public function __construct(
@@ -86,7 +88,16 @@ final class StructureCollector extends NodeVisitorAbstract
             return null;
         }
 
-        if ($node instanceof Node\Stmt\ClassMethod) {
+        if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
+            $this->enterLocalFunction($node);
+        } elseif ($node instanceof Node\Stmt\If_) {
+            $this->conditionalScopes[] = [
+                'types' => $this->localTypes,
+                'assigned' => [],
+            ];
+        } elseif ($node instanceof Node\Stmt\ElseIf_ || $node instanceof Node\Stmt\Else_) {
+            $this->localTypes = $this->conditionalScopes[array_key_last($this->conditionalScopes)]['types'];
+        } elseif ($node instanceof Node\Stmt\ClassMethod) {
             $this->enterMethod($node);
         } elseif ($node instanceof Node\Stmt\Property) {
             $this->collectProperty($node);
@@ -115,9 +126,23 @@ final class StructureCollector extends NodeVisitorAbstract
 
     public function leaveNode(Node $node): null
     {
+        if ($node instanceof Node\Stmt\If_) {
+            $scope = array_pop($this->conditionalScopes);
+            $this->localTypes = $scope['types'];
+            foreach (array_keys($scope['assigned']) as $variable) {
+                unset($this->localTypes[$variable]);
+            }
+        }
+
+        if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
+            [$this->localTypes, $this->conditionalScopes] = array_pop($this->localScopeStack);
+        }
+
         if ($node instanceof Node\Stmt\ClassMethod) {
             $this->currentMethod = null;
             $this->localTypes = [];
+            $this->localScopeStack = [];
+            $this->conditionalScopes = [];
         }
 
         if ($node instanceof Node\Stmt\ClassLike) {
@@ -134,7 +159,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 );
             }
 
-            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes]
+            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes]
                 = array_pop($this->classStack);
             $this->nameContext->set($this->currentClass, $this->currentParent);
         }
@@ -151,6 +176,8 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->symbol,
             $this->propertyTypes,
             $this->localTypes,
+            $this->localScopeStack,
+            $this->conditionalScopes,
         ];
 
         $namespacedName = $node->namespacedName;
@@ -160,6 +187,8 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->currentMethod = null;
         $this->propertyTypes = [];
         $this->localTypes = [];
+        $this->localScopeStack = [];
+        $this->conditionalScopes = [];
 
         $parent = $node instanceof Node\Stmt\Class_ ? $node->extends : null;
         $this->currentParent = $parent instanceof Node\Name ? $this->resolvedName($parent) : null;
@@ -237,6 +266,8 @@ final class StructureCollector extends NodeVisitorAbstract
     {
         $this->currentMethod = $node->name->toString();
         $this->localTypes = [];
+        $this->localScopeStack = [];
+        $this->conditionalScopes = [];
         $parameters = [];
 
         foreach ($node->params as $param) {
@@ -328,6 +359,10 @@ final class StructureCollector extends NodeVisitorAbstract
             return;
         }
 
+        foreach (array_keys($this->conditionalScopes) as $index) {
+            $this->conditionalScopes[$index]['assigned'][$node->var->name] = true;
+        }
+
         $target = null;
         if ($node->expr instanceof Node\Expr\New_ && $node->expr->class instanceof Node\Name) {
             $target = $this->resolvedName($node->expr->class);
@@ -337,6 +372,35 @@ final class StructureCollector extends NodeVisitorAbstract
 
         if ($target !== null) {
             $this->localTypes[$node->var->name] = $target;
+        } else {
+            unset($this->localTypes[$node->var->name]);
+        }
+    }
+
+    private function enterLocalFunction(Node\Expr\Closure|Node\Expr\ArrowFunction $node): void
+    {
+        $outerTypes = $this->localTypes;
+        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes];
+        $this->conditionalScopes = [];
+        $this->localTypes = $node instanceof Node\Expr\ArrowFunction ? $outerTypes : [];
+
+        if ($node instanceof Node\Expr\Closure) {
+            foreach ($node->uses as $use) {
+                if (is_string($use->var->name) && isset($outerTypes[$use->var->name])) {
+                    $this->localTypes[$use->var->name] = $outerTypes[$use->var->name];
+                }
+            }
+        }
+
+        foreach ($node->params as $param) {
+            if (!$param->var instanceof Node\Expr\Variable || !is_string($param->var->name)) {
+                continue;
+            }
+            unset($this->localTypes[$param->var->name]);
+            $types = $this->classTypes($param->type);
+            if (count($types) === 1) {
+                $this->localTypes[$param->var->name] = $types[0];
+            }
         }
     }
 
@@ -351,16 +415,14 @@ final class StructureCollector extends NodeVisitorAbstract
         $method = $node->name->toString();
         if ($method === 'make' && $this->isAppCall($node->var)) {
             $target = $this->classNameArgument($node->args[0]->value ?? null);
-            if ($target !== null) {
-                $this->addReference(
-                    $target,
-                    null,
-                    DependencyType::INSTANTIATION,
-                    Confidence::INFERRED,
-                    $node,
-                    ['resolution' => 'app_make'],
-                );
-            }
+            $this->addReference(
+                $target,
+                null,
+                DependencyType::INSTANTIATION,
+                $target === null ? Confidence::UNKNOWN : Confidence::INFERRED,
+                $node,
+                ['resolution' => 'app_make'],
+            );
 
             return;
         }
@@ -424,37 +486,40 @@ final class StructureCollector extends NodeVisitorAbstract
         $function = strtolower($node->name->getLast());
         if (in_array($function, ['event', 'dispatch'], true)) {
             $target = $this->newClassArgument($node->args[0]->value ?? null);
-            if ($target !== null) {
-                $this->addReference(
-                    $target,
-                    null,
-                    DependencyType::EVENT,
-                    Confidence::EXACT,
-                    $node,
-                    ['dispatch_kind' => $function === 'event' ? 'event' : 'job'],
-                );
-            }
+            $this->addReference(
+                $target,
+                null,
+                DependencyType::EVENT,
+                $target === null ? Confidence::UNKNOWN : Confidence::EXACT,
+                $node,
+                ['dispatch_kind' => $function === 'event' ? 'event' : 'job'],
+            );
 
             return;
         }
 
         if (in_array($function, ['app', 'resolve'], true)) {
-            $target = $this->classNameArgument($node->args[0]->value ?? null);
-            if ($target !== null) {
-                $this->addReference(
-                    $target,
-                    null,
-                    DependencyType::INSTANTIATION,
-                    Confidence::INFERRED,
-                    $node,
-                    ['resolution' => $function],
-                );
+            if ($node->args === []) {
+                return;
             }
+            $target = $this->classNameArgument($node->args[0]->value ?? null);
+            $this->addReference(
+                $target,
+                null,
+                DependencyType::INSTANTIATION,
+                $target === null ? Confidence::UNKNOWN : Confidence::INFERRED,
+                $node,
+                ['resolution' => $function],
+            );
         }
     }
 
     private function receiverType(Node\Expr $receiver): array
     {
+        if ($receiver instanceof Node\Expr\Variable && $receiver->name === 'this') {
+            return [$this->currentClass, Confidence::EXACT];
+        }
+
         if ($receiver instanceof Node\Expr\PropertyFetch
             && $receiver->var instanceof Node\Expr\Variable
             && $receiver->var->name === 'this'

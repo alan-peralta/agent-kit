@@ -12,7 +12,7 @@ final class RefactorAnalyzeCommand extends Command
     use RendersCapabilityResults;
 
     protected $signature = 'agent-kit:refactor-analyze
-        {target : Project-relative PHP file, absolute in-project PHP file, fully qualified class, or Class::method}
+        {file : Project-relative PHP file, absolute in-project PHP file, fully qualified class, or Class::method}
         {--path= : Project root; defaults to the Laravel base path}
         {--json : Emit JSON only}';
 
@@ -23,7 +23,7 @@ final class RefactorAnalyzeCommand extends Command
         try {
             $result = $capabilities->analyze(
                 (string) ($this->option('path') ?: base_path()),
-                (string) $this->argument('target'),
+                (string) $this->argument('file'),
             );
         } catch (CapabilityException $exception) {
             return $this->renderCapabilityFailure($exception, (bool) $this->option('json'));

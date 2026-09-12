@@ -12,7 +12,7 @@ final class RefactorDependenciesCommand extends Command
     use RendersCapabilityResults;
 
     protected $signature = 'agent-kit:refactor-dependencies
-        {target : Fully qualified target class}
+        {class : Fully qualified target class}
         {--path= : Project root; defaults to the Laravel base path}
         {--json : Emit JSON only}';
 
@@ -23,7 +23,7 @@ final class RefactorDependenciesCommand extends Command
         try {
             $result = $capabilities->dependencies(
                 (string) ($this->option('path') ?: base_path()),
-                (string) $this->argument('target'),
+                (string) $this->argument('class'),
             );
         } catch (CapabilityException $exception) {
             return $this->renderCapabilityFailure($exception, (bool) $this->option('json'));

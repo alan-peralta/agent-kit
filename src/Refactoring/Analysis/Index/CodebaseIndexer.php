@@ -21,6 +21,7 @@ final class CodebaseIndexer
     {
         $root = $this->normalizedRoot($root);
         $symbols = [];
+        $classDeclarations = [];
         $diagnostics = [];
         $references = [];
         /** @var list<Reference> $unresolvedReferences */
@@ -34,26 +35,58 @@ final class CodebaseIndexer
             $references = array_merge($references, $parsed->references);
 
             foreach ($parsed->symbols as $symbol) {
-                $symbols[ltrim($symbol->fqcn, '\\')] = $symbol;
-                $graph->addNode(new DependencyNode(
-                    ltrim($symbol->fqcn, '\\'),
-                    $symbol->kind,
-                    $symbol->file,
-                    $symbol->line,
-                ));
+                $key = strtolower(ltrim($symbol->fqcn, '\\'));
+                $classDeclarations[$key][] = $symbol;
+                $symbols[$key] ??= $symbol;
             }
         }
+
+        foreach ($classDeclarations as $declarations) {
+            if (count($declarations) !== 1) {
+                continue;
+            }
+            $symbol = $declarations[0];
+            $graph->addNode(new DependencyNode(
+                ltrim($symbol->fqcn, '\\'),
+                $symbol->kind,
+                $symbol->file,
+                $symbol->line,
+            ));
+        }
+
+        $canonicalMethod = function (string $class, ?string $method) use ($classDeclarations): ?string {
+            if ($method === null) {
+                return null;
+            }
+            $declarations = $classDeclarations[strtolower(ltrim($class, '\\'))] ?? [];
+            if (count($declarations) !== 1) {
+                return $method;
+            }
+            foreach ($declarations[0]->methods as $definition) {
+                if (strcasecmp($definition['name'], $method) === 0) {
+                    return $definition['name'];
+                }
+            }
+
+            return $method;
+        };
 
         foreach ($references as $reference) {
             if ($reference->target === null) {
                 $unresolvedReferences[] = $reference;
                 continue;
             }
+            $sourceKey = strtolower(ltrim($reference->source, '\\'));
+            $targetKey = strtolower(ltrim($reference->target, '\\'));
+            if (count($classDeclarations[$sourceKey] ?? []) > 1
+                || count($classDeclarations[$targetKey] ?? []) > 1) {
+                continue;
+            }
             $graph->addEdge(new DependencyEdge(
                 ltrim($reference->source, '\\'),
                 $reference->sourceMethod,
                 ltrim($reference->target, '\\'),
-                $reference->targetMethod,
+                $canonicalMethod($reference->target, $reference->targetMethod),
                 $reference->type,
                 $reference->confidence,
                 $reference->file,
@@ -63,8 +96,9 @@ final class CodebaseIndexer
         }
 
         ksort($symbols, SORT_STRING);
+        ksort($classDeclarations, SORT_STRING);
 
-        return new CodebaseIndex($symbols, $graph, $diagnostics, $unresolvedReferences);
+        return new CodebaseIndex($symbols, $graph, $diagnostics, $unresolvedReferences, $classDeclarations);
     }
 
     private function normalizedRoot(string $root): string

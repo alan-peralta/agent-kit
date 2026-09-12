@@ -93,7 +93,7 @@ final class RefactoringCommandsTest extends TestCase
     public function test_analyze_json_accepts_class_and_absolute_file_targets(): void
     {
         self::assertSame(0, Artisan::call('agent-kit:refactor-analyze', [
-            'target' => 'Fixtures\\Checkout\\CheckoutService',
+            'file' => 'Fixtures\\Checkout\\CheckoutService',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]));
@@ -104,7 +104,7 @@ final class RefactoringCommandsTest extends TestCase
         self::assertSame('CheckoutService.php', $class['data']['metrics']['path']);
 
         self::assertSame(0, Artisan::call('agent-kit:refactor-analyze', [
-            'target' => $this->fixtureRoot() . '/CheckoutService.php',
+            'file' => $this->fixtureRoot() . '/CheckoutService.php',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]));
@@ -117,7 +117,7 @@ final class RefactoringCommandsTest extends TestCase
     public function test_callers_json_forwards_class_method_target(): void
     {
         $status = Artisan::call('agent-kit:refactor-callers', [
-            'target' => 'Fixtures\\Payments\\PaymentService::charge',
+            'class' => 'Fixtures\\Payments\\PaymentService::charge',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]);
@@ -133,7 +133,7 @@ final class RefactoringCommandsTest extends TestCase
     public function test_legacy_method_option_is_forwarded_without_changing_the_canonical_target_argument(): void
     {
         $status = Artisan::call('agent-kit:refactor-impact', [
-            'target' => 'Fixtures\\Payments\\PaymentService',
+            'class' => 'Fixtures\\Payments\\PaymentService',
             '--method' => 'charge',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
@@ -147,7 +147,7 @@ final class RefactoringCommandsTest extends TestCase
     public function test_dependencies_and_impact_emit_versioned_json(): void
     {
         self::assertSame(0, Artisan::call('agent-kit:refactor-dependencies', [
-            'target' => 'Fixtures\\Checkout\\CheckoutService',
+            'class' => 'Fixtures\\Checkout\\CheckoutService',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]));
@@ -157,7 +157,7 @@ final class RefactoringCommandsTest extends TestCase
         self::assertArrayHasKey('downstream_dependents', $dependencies['data']);
 
         self::assertSame(0, Artisan::call('agent-kit:refactor-impact', [
-            'target' => 'Fixtures\\Payments\\PaymentService::charge',
+            'class' => 'Fixtures\\Payments\\PaymentService::charge',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]));
@@ -170,7 +170,7 @@ final class RefactoringCommandsTest extends TestCase
     public function test_json_failure_uses_the_exact_stable_error_envelope(): void
     {
         $status = Artisan::call('agent-kit:refactor-impact', [
-            'target' => 'Missing\\Service',
+            'class' => 'Missing\\Service',
             '--path' => $this->fixtureRoot(),
             '--json' => true,
         ]);
@@ -188,7 +188,7 @@ final class RefactoringCommandsTest extends TestCase
     public function test_human_commands_render_useful_output_and_audit_reports(): void
     {
         self::assertSame(0, Artisan::call('agent-kit:refactor-impact', [
-            'target' => 'Fixtures\\Payments\\PaymentService',
+            'class' => 'Fixtures\\Payments\\PaymentService',
             '--path' => $this->fixtureRoot(),
         ]));
         $impactOutput = Artisan::output();
@@ -320,7 +320,7 @@ final class RefactoringCommandsTest extends TestCase
         file_put_contents($root . '/Broken.php', '<?php class Broken {');
 
         $status = Artisan::call('agent-kit:refactor-impact', [
-            'target' => 'Demo\\Valid',
+            'class' => 'Demo\\Valid',
             '--path' => $root,
             '--json' => true,
         ]);

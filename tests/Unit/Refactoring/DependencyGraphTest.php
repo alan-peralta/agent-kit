@@ -30,4 +30,20 @@ final class DependencyGraphTest extends TestCase
         $this->assertSame(['B', 'C'], $dependents[0]['path']);
         $this->assertSame(['A', 'B', 'C'], $dependents[1]['path']);
     }
+
+    public function test_node_and_edge_identity_is_case_insensitive_without_lowercasing_output(): void
+    {
+        $graph = new DependencyGraph();
+        $graph->addNode(new DependencyNode('Demo\\Target', 'class', 'Target.php', 2));
+        $graph->addNode(new DependencyNode('Demo\\Caller', 'class', 'Caller.php', 2));
+        $graph->addEdge(new DependencyEdge('Demo\\Caller', 'run', 'demo\\target', 'Charge', DependencyType::METHOD_CALL, Confidence::EXACT, 'Caller.php', 5));
+        $graph->addEdge(new DependencyEdge('DEMO\\TARGET', 'notify', 'demo\\caller', 'run', DependencyType::METHOD_CALL, Confidence::EXACT, 'Target.php', 6));
+
+        $this->assertSame('Demo\\Target', $graph->node('DEMO\\TARGET')?->fqcn);
+        $this->assertSame('Demo\\Caller', $graph->incoming('Demo\\Target')[0]->source);
+        $this->assertSame('Demo\\Target', $graph->incoming('Demo\\Target')[0]->target);
+        $dependents = $graph->transitiveDependents('demo\\target');
+        $this->assertSame(['Demo\\Caller'], array_column($dependents, 'fqcn'));
+        $this->assertSame(['Demo\\Caller', 'Demo\\Target'], $dependents[0]['path']);
+    }
 }

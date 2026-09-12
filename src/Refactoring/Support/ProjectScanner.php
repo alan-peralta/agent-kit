@@ -32,16 +32,19 @@ final class ProjectScanner
             }
 
             $path = $file->getPathname();
-            if ($this->isExcluded($path, $root)) {
+            $canonical = realpath($path);
+            if ($canonical === false
+                || !ProjectRoot::contains($root, $canonical)
+                || $this->isExcluded($canonical, $root)) {
                 continue;
             }
 
-            $files[] = $path;
+            $files[$canonical] = $canonical;
         }
 
         sort($files, SORT_STRING);
 
-        return $files;
+        return array_values($files);
     }
 
     public function scan(string $root): array

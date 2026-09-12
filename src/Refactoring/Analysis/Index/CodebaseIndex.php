@@ -11,6 +11,7 @@ final readonly class CodebaseIndex
 {
     private array $methodsByClass;
     private array $symbolsByFile;
+    private array $symbolsByClass;
 
     /** @param list<Reference> $unresolvedReferences */
     public function __construct(
@@ -18,22 +19,36 @@ final readonly class CodebaseIndex
         private DependencyGraph $dependencyGraph,
         private array $parseDiagnostics = [],
         private array $unresolvedReferences = [],
+        array $classDeclarations = [],
     ) {
         $methods = [];
         $files = [];
-        foreach ($symbols as $fqcn => $symbol) {
-            foreach ($symbol->methods as $method) {
-                $methods[$fqcn][strtolower($method['name'])] = $method;
+        $declarations = $classDeclarations;
+        if ($declarations === []) {
+            foreach ($symbols as $symbol) {
+                $declarations[$this->normalize($symbol->fqcn)][] = $symbol;
             }
-            $files[str_replace('\\', '/', $symbol->file)][] = $symbol;
+        }
+        foreach ($declarations as $classSymbols) {
+            foreach ($classSymbols as $symbol) {
+                $files[str_replace('\\', '/', $symbol->file)][] = $symbol;
+            }
+            if (count($classSymbols) !== 1) {
+                continue;
+            }
+            $symbol = $classSymbols[0];
+            foreach ($symbol->methods as $method) {
+                $methods[$this->normalize($symbol->fqcn)][strtolower($method['name'])] = $method;
+            }
         }
         $this->methodsByClass = $methods;
         $this->symbolsByFile = $files;
+        $this->symbolsByClass = $declarations;
     }
 
     public function findClass(string $fqcn): ?SymbolDefinition
     {
-        return $this->symbols[$this->normalize($fqcn)] ?? null;
+        return $this->symbolsByClass[$this->normalize($fqcn)][0] ?? null;
     }
 
     public function findReferencesTo(string $fqcn): array
@@ -66,8 +81,19 @@ final readonly class CodebaseIndex
                 DependencyType::FACADE,
                 DependencyType::EVENT,
             ], true)
-                && ($method === null || $edge->targetMethod === $method),
+                && ($method === null || strcasecmp((string) $edge->targetMethod, $method) === 0),
         ));
+    }
+
+    public function isClassAmbiguous(string $fqcn): bool
+    {
+        return count($this->symbolsByClass[$this->normalize($fqcn)] ?? []) > 1;
+    }
+
+    /** @return list<SymbolDefinition> */
+    public function classDeclarations(string $fqcn): array
+    {
+        return $this->symbolsByClass[$this->normalize($fqcn)] ?? [];
     }
 
     public function graph(): DependencyGraph
@@ -91,6 +117,6 @@ final readonly class CodebaseIndex
 
     private function normalize(string $fqcn): string
     {
-        return ltrim($fqcn, '\\');
+        return strtolower(ltrim($fqcn, '\\'));
     }
 }

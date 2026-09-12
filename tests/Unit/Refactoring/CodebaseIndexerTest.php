@@ -83,4 +83,95 @@ final class CodebaseIndexerTest extends TestCase
         $this->assertContains('unknown', array_column($index->unresolvedReferences(), 'confidence'));
         $this->assertContains(null, array_column($index->unresolvedReferences(), 'target'), true);
     }
+
+    public function test_class_and_method_lookups_are_case_insensitive_but_preserve_declared_spelling(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-case-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Service.php', <<<'PHP'
+<?php
+namespace Demo;
+final class PaymentService { public function charge(): void {} }
+final class Caller { public function run(PaymentService $service): void { $service->Charge(); } }
+PHP);
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertSame('Demo\\PaymentService', $index->findClass('demo\\paymentservice')?->fqcn);
+            $this->assertSame('charge', $index->findMethod('DEMO\\PAYMENTSERVICE', 'CHARGE')['name']);
+            $calls = $index->findMethodCalls('demo\\paymentservice', 'charge');
+            $this->assertCount(1, $calls);
+            $this->assertSame('Demo\\Caller', $calls[0]->source);
+            $this->assertSame('Demo\\PaymentService', $calls[0]->target);
+            $this->assertSame('charge', $calls[0]->targetMethod);
+        } finally {
+            unlink($root . '/Service.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_it_retains_case_insensitive_duplicate_declarations_as_ambiguous(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-duplicate-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service { function run(): void {} }');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service { function execute(): void {} }');
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertTrue($index->isClassAmbiguous('DEMO\\SERVICE'));
+            $this->assertSame(
+                ['First.php', 'Second.php'],
+                array_column($index->classDeclarations('demo\\service'), 'file'),
+            );
+            $this->assertSame('First.php', $index->findClass('Demo\\Service')?->file);
+            $this->assertNull($index->findMethod('Demo\\Service', 'run'));
+            $this->assertNull($index->graph()->node('Demo\\Service'));
+        } finally {
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_it_indexes_dynamic_container_resolution_as_an_unresolved_reference(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-dynamic-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Dynamic.php', <<<'PHP'
+<?php
+namespace Demo;
+class Dynamic { function run(string $className): void { app($className); } }
+PHP);
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertSame([[
+                'source' => 'Demo\\Dynamic',
+                'source_method' => 'run',
+                'target' => null,
+                'target_method' => null,
+                'type' => 'instantiation',
+                'confidence' => 'unknown',
+                'file' => 'Dynamic.php',
+                'line' => 3,
+                'metadata' => ['resolution' => 'app'],
+            ]], $index->unresolvedReferences());
+        } finally {
+            unlink($root . '/Dynamic.php');
+            rmdir($root);
+        }
+    }
 }

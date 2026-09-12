@@ -92,7 +92,9 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
 
         $method = $requested->method === null
             ? null
-            : $this->canonicalMethod($index, $symbols[0]->fqcn, $requested->method);
+            : ($isFileTarget
+                ? $this->canonicalMethodInSymbol($symbols[0], $requested->method)
+                : $this->canonicalMethod($index, $symbols[0]->fqcn, $requested->method));
 
         $metrics = $this->fileAnalyzer->analyze($file, $displayPath)->toArray();
         $data = [
@@ -172,13 +174,13 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         }
 
         $index = $this->indexer->build($root);
-        $this->requireClass($index, $requested->value);
+        $symbol = $this->requireClass($index, $requested->value);
 
         return new CapabilityResult('dependencies', [
-            'target' => $requested->value,
-            'upstream_dependencies' => $this->edges($index->findDependencies($requested->value)),
-            'downstream_dependents' => $this->edges($index->findReferencesTo($requested->value)),
-            'transitive_dependents' => $index->graph()->transitiveDependents($requested->value),
+            'target' => $symbol->fqcn,
+            'upstream_dependencies' => $this->edges($index->findDependencies($symbol->fqcn)),
+            'downstream_dependents' => $this->edges($index->findReferencesTo($symbol->fqcn)),
+            'transitive_dependents' => $index->graph()->transitiveDependents($symbol->fqcn),
         ], $index->diagnostics(), $index->unresolvedReferences());
     }
 
@@ -306,6 +308,12 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
 
     private function requireClass(CodebaseIndex $index, string $class): SymbolDefinition
     {
+        if ($index->isClassAmbiguous($class)) {
+            throw new CapabilityException(
+                'AMBIGUOUS_TARGET',
+                "Multiple declarations found for class: {$class}",
+            );
+        }
         $symbol = $index->findClass($class);
         if ($symbol === null) {
             throw new CapabilityException('TARGET_NOT_FOUND', "Class not found: {$class}");
@@ -329,6 +337,20 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         }
 
         return $definition['name'];
+    }
+
+    private function canonicalMethodInSymbol(SymbolDefinition $symbol, string $method): string
+    {
+        foreach ($symbol->methods as $definition) {
+            if (strcasecmp($definition['name'], $method) === 0) {
+                return $definition['name'];
+            }
+        }
+
+        throw new CapabilityException(
+            'TARGET_NOT_FOUND',
+            "Method not found: {$symbol->fqcn}::{$method}",
+        );
     }
 
     private function edges(array $edges): array

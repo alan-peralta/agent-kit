@@ -23,10 +23,12 @@ final class CallerAnalyzer
 
     public function findCallers(CodebaseIndex $index, string $class, ?string $method = null): CallerResult
     {
-        $target = ltrim($class, '\\');
-        if ($index->findClass($target) === null) {
-            throw new \InvalidArgumentException("Classe não encontrada no índice: {$target}");
+        $requested = ltrim($class, '\\');
+        $symbol = $index->findClass($requested);
+        if ($symbol === null) {
+            throw new \InvalidArgumentException("Classe não encontrada no índice: {$requested}");
         }
+        $target = $symbol->fqcn;
 
         $direct = array_map(
             fn ($edge) => $edge->toArray(),

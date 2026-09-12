@@ -59,6 +59,34 @@ class ProjectScannerTest extends TestCase
         @rmdir($root);
     }
 
+    public function test_it_skips_php_symlinks_whose_real_target_is_outside_the_project(): void
+    {
+        $parent = $this->fixtureRoot();
+        $root = $parent . '/project';
+        $outside = $parent . '/External.php';
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Internal.php', '<?php class Internal {}');
+        file_put_contents($outside, '<?php class ExternalSecret {}');
+
+        try {
+            if (!function_exists('symlink') || !@symlink($outside, $root . '/Linked.php')) {
+                $this->markTestSkipped('Symbolic links are not available in this environment.');
+            }
+
+            $scanner = new ProjectScanner(new PhpFileAnalyzer());
+            $this->assertSame([(string) realpath($root . '/Internal.php')], $scanner->phpFiles($root));
+            $this->assertSame(['Internal.php'], array_column($scanner->scan($root), 'path'));
+        } finally {
+            if (is_link($root . '/Linked.php')) {
+                unlink($root . '/Linked.php');
+            }
+            unlink($root . '/Internal.php');
+            unlink($outside);
+            rmdir($root);
+            rmdir($parent);
+        }
+    }
+
     private function fixtureRoot(): string
     {
         return sys_get_temp_dir() . '/agent-kit-scan-' . bin2hex(random_bytes(6));

@@ -15,6 +15,17 @@ final class DependencyGraph
 
     public function addEdge(DependencyEdge $edge): void
     {
+        $edge = new DependencyEdge(
+            $this->canonical($edge->source),
+            $edge->sourceMethod,
+            $this->canonical($edge->target),
+            $edge->targetMethod,
+            $edge->type,
+            $edge->confidence,
+            $edge->file,
+            $edge->line,
+            $edge->metadata,
+        );
         $this->outgoing[$this->normalize($edge->source)][] = $edge;
         $this->incoming[$this->normalize($edge->target)][] = $edge;
     }
@@ -46,18 +57,19 @@ final class DependencyGraph
     {
         $target = $this->normalize($fqcn);
         $visited = [$target => true];
-        $queue = [[$target, [$target]]];
+        $queue = [[$target, [$this->canonical($fqcn)]]];
         $result = [];
 
         while ($queue !== []) {
             [$current, $path] = array_shift($queue);
             foreach ($this->incoming($current) as $edge) {
-                $source = $this->normalize($edge->source);
-                if (isset($visited[$source])) {
+                $sourceKey = $this->normalize($edge->source);
+                if (isset($visited[$sourceKey])) {
                     continue;
                 }
 
-                $visited[$source] = true;
+                $visited[$sourceKey] = true;
+                $source = $this->canonical($edge->source);
                 $sourcePath = array_merge([$source], $path);
                 $result[] = [
                     'fqcn' => $source,
@@ -65,7 +77,7 @@ final class DependencyGraph
                     'depth' => count($sourcePath) - 1,
                     'path' => $sourcePath,
                 ];
-                $queue[] = [$source, $sourcePath];
+                $queue[] = [$sourceKey, $sourcePath];
             }
         }
 
@@ -99,6 +111,11 @@ final class DependencyGraph
 
     private function normalize(string $fqcn): string
     {
-        return ltrim($fqcn, '\\');
+        return strtolower(ltrim($fqcn, '\\'));
+    }
+
+    private function canonical(string $fqcn): string
+    {
+        return ($this->nodes[$this->normalize($fqcn)] ?? null)?->fqcn ?? ltrim($fqcn, '\\');
     }
 }

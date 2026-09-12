@@ -12,7 +12,7 @@ final class RefactorCallersCommand extends Command
     use RendersCapabilityResults;
 
     protected $signature = 'agent-kit:refactor-callers
-        {target : Fully qualified class or Class::method}
+        {class : Fully qualified class or Class::method}
         {--method= : Deprecated method scope; prefer Class::method}
         {--path= : Project root; defaults to the Laravel base path}
         {--json : Emit JSON only}';
@@ -21,7 +21,7 @@ final class RefactorCallersCommand extends Command
 
     public function handle(RefactoringCapabilities $capabilities): int
     {
-        $target = (string) $this->argument('target');
+        $target = (string) $this->argument('class');
         if ($this->option('method') !== null) {
             $target .= '::' . (string) $this->option('method');
         }

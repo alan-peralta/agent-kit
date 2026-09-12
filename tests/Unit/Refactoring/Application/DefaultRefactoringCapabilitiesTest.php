@@ -193,6 +193,181 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
         );
     }
 
+    public function test_class_targets_are_case_insensitive_and_all_outputs_use_declared_spelling(): void
+    {
+        $class = 'fixtures\\payments\\paymentservice';
+
+        $analyze = $this->service()->analyze($this->root, $class . '::CHARGE');
+        $callers = $this->service()->findCallers($this->root, $class . '::CHARGE');
+        $dependencies = $this->service()->dependencies($this->root, $class);
+        $impact = $this->service()->impact($this->root, $class . '::CHARGE');
+
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $analyze->data['target']);
+        $this->assertSame('charge', $analyze->data['method']);
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $callers->data['target']);
+        $this->assertSame('charge', $callers->data['method']);
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $dependencies->data['target']);
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $impact->data['target']);
+        $this->assertSame('charge', $impact->data['method']);
+    }
+
+    public function test_mixed_case_call_sites_are_canonical_in_callers_dependencies_and_impact(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-call-case-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Services.php', <<<'PHP'
+<?php
+namespace Demo;
+final class PaymentService { public function charge(): void {} }
+final class Caller {
+    public function __construct(private PaymentService $service) {}
+    public function run(): void { $this->service->Charge(); }
+}
+PHP);
+
+        try {
+            $callers = $this->service()->findCallers($root, 'demo\\paymentservice::CHARGE');
+            $dependencies = $this->service()->dependencies($root, 'DEMO\\PAYMENTSERVICE');
+            $impact = $this->service()->impact($root, 'demo\\paymentservice::charge');
+
+            $this->assertSame('Demo\\PaymentService', $callers->data['target']);
+            $this->assertSame('charge', $callers->data['method']);
+            $this->assertSame('Demo\\PaymentService', $callers->data['direct_callers'][0]['target']);
+            $this->assertSame('charge', $callers->data['direct_callers'][0]['target_method']);
+            $this->assertSame('Demo\\PaymentService', $dependencies->data['target']);
+            $this->assertContains('Demo\\Caller', array_column($dependencies->data['downstream_dependents'], 'source'));
+            $this->assertSame('Demo\\PaymentService', $impact->data['target']);
+            $this->assertSame('charge', $impact->data['method']);
+            $this->assertSame('Demo\\PaymentService', $impact->data['direct'][0]['target']);
+        } finally {
+            unlink($root . '/Services.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_same_class_method_calls_are_included_without_self_transitive_cycles(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-this-call-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Service.php', <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(): void { $this->charge(); }
+    private function charge(): void {}
+}
+PHP);
+
+        try {
+            $callers = $this->service()->findCallers($root, 'demo\\service::CHARGE');
+            $impact = $this->service()->impact($root, 'DEMO\\SERVICE::charge');
+
+            $this->assertSame('Demo\\Service', $callers->data['target']);
+            $this->assertSame('run', $callers->data['direct_callers'][0]['source_method']);
+            $this->assertSame([], $callers->data['transitive_dependents']);
+            $this->assertSame(1, $impact->data['direct_callers']);
+            $this->assertSame([], $impact->data['transitive']);
+        } finally {
+            unlink($root . '/Service.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_fqcn_operations_reject_case_insensitive_duplicate_declarations_but_file_analysis_works(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-ambiguous-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service { public function run(): void {} }');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service { public function run(): void {} }');
+
+        try {
+            foreach ([
+                'analyze' => 'DEMO\\SERVICE::run',
+                'findCallers' => 'DEMO\\SERVICE::run',
+                'dependencies' => 'DEMO\\SERVICE',
+                'impact' => 'DEMO\\SERVICE::run',
+            ] as $operation => $target) {
+                try {
+                    $this->service()->{$operation}($root, $target);
+                    $this->fail("Expected {$operation} to reject an ambiguous class.");
+                } catch (CapabilityException $exception) {
+                    $this->assertSame('AMBIGUOUS_TARGET', $exception->errorCode);
+                }
+            }
+
+            $file = $this->service()->analyze($root, 'First.php');
+            $this->assertSame('First.php', $file->data['target']);
+            $this->assertSame('First.php', $file->data['metrics']['path']);
+            $method = $this->service()->analyze($root, 'First.php::RUN');
+            $this->assertSame('run', $method->data['method']);
+        } finally {
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_external_php_symlinks_are_not_indexed_by_any_capability(): void
+    {
+        $parent = sys_get_temp_dir() . '/agent-kit-external-' . bin2hex(random_bytes(6));
+        $root = $parent . '/project';
+        $outside = $parent . '/External.php';
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Internal.php', '<?php namespace Demo; class Internal {}');
+        file_put_contents($outside, '<?php namespace Secret; class External {}');
+
+        try {
+            if (!function_exists('symlink') || !@symlink($outside, $root . '/Linked.php')) {
+                $this->markTestSkipped('Symbolic links are not available in this environment.');
+            }
+
+            $audit = $this->service()->audit($root);
+            $this->assertSame(1, $audit->data['summary']['php_files']);
+            foreach (['analyze', 'findCallers', 'dependencies', 'impact'] as $operation) {
+                try {
+                    $this->service()->{$operation}($root, 'Secret\\External');
+                    $this->fail("Expected {$operation} not to resolve an external class.");
+                } catch (CapabilityException $exception) {
+                    $this->assertSame('TARGET_NOT_FOUND', $exception->errorCode);
+                }
+            }
+        } finally {
+            if (is_link($root . '/Linked.php')) {
+                unlink($root . '/Linked.php');
+            }
+            unlink($root . '/Internal.php');
+            unlink($outside);
+            rmdir($root);
+            rmdir($parent);
+        }
+    }
+
+    public function test_dynamic_laravel_references_make_capability_results_incomplete(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-dynamic-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/DynamicService.php', <<<'PHP'
+<?php
+namespace Demo;
+final class DynamicService {
+    public function resolve(string $className): void { app($className); }
+}
+PHP);
+
+        try {
+            $result = $this->service()->analyze($root, 'Demo\\DynamicService');
+
+            $this->assertTrue($result->incomplete());
+            $this->assertCount(1, $result->unresolved);
+            $this->assertNull($result->unresolved[0]['target']);
+            $this->assertSame('unknown', $result->unresolved[0]['confidence']);
+            $this->assertSame(['resolution' => 'app'], $result->unresolved[0]['metadata']);
+        } finally {
+            unlink($root . '/DynamicService.php');
+            rmdir($root);
+        }
+    }
+
     public function test_it_aggregates_relationships_for_every_symbol_in_a_file(): void
     {
         $result = $this->service(
