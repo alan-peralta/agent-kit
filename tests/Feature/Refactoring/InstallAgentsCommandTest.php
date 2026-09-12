@@ -320,6 +320,9 @@ final class InstallAgentsCommandTest extends TestCase
         self::assertStringContainsString('agent-kit:agents:install', $contents);
         self::assertStringContainsString('agent-kit:refactor-impact', $contents);
         self::assertStringContainsString('MCP', $contents);
+        self::assertStringContainsString('Refactoring Core', $contents);
+        self::assertStringContainsString('Coding Agents', $contents);
+        self::assertStringContainsString('+--------------+--------------+', $contents);
 
         foreach ([
             '/refactor-audit',

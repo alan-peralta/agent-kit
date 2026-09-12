@@ -92,6 +92,14 @@ capabilities shared by the direct CLI, Cursor/Claude Code adapters, and a future
 MCP server. Agent-specific adapters render native skill and rule files from the
 same canonical command repository instead of duplicating analysis logic.
 
+```text
+               Refactoring Core
+                     |
+      +--------------+--------------+
+      v              v              v
+     CLI        Coding Agents       MCP
+```
+
 ## Current deterministic signals
 
 - Large Class candidate (LOC threshold)

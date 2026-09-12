@@ -320,3 +320,11 @@ O Refactoring Core é compartilhado pela CLI, pelos coding agents e pelo futuro
 servidor MCP. No `/refactor-plan`, a saída é somente um plano. No `/refactor-audit`
 e nos demais comandos, a saída é somente análise. No command applies changes
 automatically. No `/refactor-apply` command is generated.
+
+```text
+               Refactoring Core
+                     |
+      +--------------+--------------+
+      v              v              v
+     CLI        Coding Agents       MCP
+```
