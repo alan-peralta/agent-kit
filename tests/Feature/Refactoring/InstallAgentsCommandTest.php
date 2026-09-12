@@ -9,6 +9,7 @@ use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
 use Peralta\AgentKit\Refactoring\Agents\AgentTemplateRenderer;
 use Peralta\AgentKit\Refactoring\Commands\InstallAgentsCommand;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionProperty;
 
 final class InstallAgentsCommandTest extends TestCase
@@ -307,6 +308,38 @@ final class InstallAgentsCommandTest extends TestCase
             'Install Agent Kit refactoring skills for coding agents',
             $command->getDescription(),
         );
+    }
+
+    #[DataProvider('refactoringDocumentationFiles')]
+    public function test_refactoring_documentation_explains_coding_agent_integration(string $file): void
+    {
+        $contents = file_get_contents(dirname(__DIR__, 3) . '/' . $file);
+
+        self::assertIsString($contents);
+        self::assertStringContainsString('## Using Refactoring Agent with Coding Agents', $contents);
+        self::assertStringContainsString('agent-kit:agents:install', $contents);
+        self::assertStringContainsString('agent-kit:refactor-impact', $contents);
+        self::assertStringContainsString('MCP', $contents);
+
+        foreach ([
+            '/refactor-audit',
+            '/refactor-analyze',
+            '/refactor-callers',
+            '/refactor-dependencies',
+            '/refactor-impact',
+            '/refactor-plan',
+        ] as $command) {
+            self::assertStringContainsString($command, $contents);
+        }
+
+        self::assertStringContainsString('No `/refactor-apply` command is generated.', $contents);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function refactoringDocumentationFiles(): iterable
+    {
+        yield 'README' => ['README.md'];
+        yield 'Refactoring guide' => ['REFACTORING_AGENT.md'];
     }
 
     private function temporaryDirectory(): string

@@ -9,13 +9,17 @@ php artisan agent-kit:refactor-audit
 php artisan agent-kit:refactor-audit /path/to/project
 php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
 php artisan agent-kit:refactor-callers "App\Services\PaymentService"
-php artisan agent-kit:refactor-callers "App\Services\PaymentService" --method=charge
+php artisan agent-kit:refactor-callers "App\Services\PaymentService::charge"
 php artisan agent-kit:refactor-dependencies "App\Services\PaymentService"
-php artisan agent-kit:refactor-impact "App\Services\PaymentService"
+php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge"
 ```
 
 The graph commands accept `--path=/path/to/project` and default to the Laravel
 base path. Add `--json` to emit deterministic structured output without tables.
+For audit, the project root is the optional positional argument. Its reports
+stay under the analyzed project by default; `--output=/explicit/directory` may
+select another destination explicitly. JSON mode emits data without writing
+reports.
 
 The audit writes:
 
@@ -27,6 +31,66 @@ The audit writes:
 ```
 
 `audit.json` is intended to be consumed by Cursor, Claude Code or another coding agent. `audit.md` is the human-readable report. `baseline.json` stores the summary for future trend comparison.
+
+## Using Refactoring Agent with Coding Agents
+
+Install the native Cursor or Claude Code skills into the project to analyze:
+
+```bash
+php artisan agent-kit:agents:install cursor --path=/project
+php artisan agent-kit:agents:install claude --path=/project
+php artisan agent-kit:agents:install --all --path=/project
+```
+
+`--path=/project` must name an existing directory. Omitting it uses the Laravel
+application base path, while an explicitly empty or whitespace-only value is
+rejected. Choose positional agents (`cursor`, `claude`) or `--all`; combining
+them is rejected. Installation creates only Agent Kit-dedicated files. A
+different existing file is reported as a conflict and preserved; `--force`
+must be explicit to overwrite it. Reinstalling identical content reports the
+file as unchanged.
+
+Both adapters expose the same portable interface:
+
+```text
+/refactor-audit
+/refactor-analyze <target>
+/refactor-callers <target>
+/refactor-dependencies <target>
+/refactor-impact <target>
+/refactor-plan <target>
+```
+
+Targets may be project-relative PHP files, fully qualified classes, or
+`Class::method` where the capability supports method scope. For example:
+
+```text
+/refactor-impact App\Services\PaymentService::charge
+```
+
+The generated instructions gather evidence in this order:
+
+1. A compatible MCP capability, when one is available.
+2. The corresponding `php artisan agent-kit:refactor-* --json` command.
+3. Repository search plus source and test reading for missing context.
+4. LLM inference for interpretation only, never for invented relationships.
+
+An Agent Kit MCP server does **not** exist yet; MCP is a future adapter. The
+direct CLI is therefore the deterministic fallback today, for example:
+
+```bash
+php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json --path=/project
+```
+
+Responses separate `FACTS`, `INTERPRETATION`, and `RECOMMENDATIONS`. Dynamic
+behavior that static analysis cannot resolve remains explicitly unknown or
+unresolved. `ANALYZE != MODIFY`: the six skills audit, explain, or plan only.
+No `/refactor-apply` command is generated.
+
+The architecture stays deliberately small: one Refactoring Core provides the
+capabilities shared by the direct CLI, Cursor/Claude Code adapters, and a future
+MCP server. Agent-specific adapters render native skill and rule files from the
+same canonical command repository instead of duplicating analysis logic.
 
 ## Current deterministic signals
 
@@ -99,9 +163,9 @@ to invented class names.
 ## Callers and dependencies
 
 `refactor-callers` separates direct `method_call`, `static_call`, `facade`, and
-`event` edges from structural dependencies. With `--method`, only direct calls
-to that method are returned; structural class dependencies remain visible
-because they are still relevant to class-level impact.
+`event` edges from structural dependencies. With a `Class::method` target, only
+direct calls to that method are returned; structural class dependencies remain
+visible because they are still relevant to class-level impact.
 
 `refactor-dependencies` lists outgoing edges from a class and explains the
 target, type, confidence, source method, file, and line.
@@ -110,11 +174,18 @@ The JSON caller schema is:
 
 ```json
 {
-  "target": "App\\Services\\PaymentService",
-  "method": "charge",
-  "direct_callers": [],
-  "structural_dependencies": [],
-  "diagnostics": []
+  "schema_version": "1.0",
+  "capability": "find_callers",
+  "incomplete": false,
+  "data": {
+    "target": "App\\Services\\PaymentService",
+    "method": "charge",
+    "direct_callers": [],
+    "structural_dependencies": [],
+    "transitive_dependents": []
+  },
+  "diagnostics": [],
+  "unresolved": []
 }
 ```
 
@@ -190,10 +261,9 @@ Use this order when an LLM consumes the report:
 4. Map side effects: database, queues, cache, Redis, HTTP APIs, events and webhooks.
 5. Locate tests and identify behavior that must remain stable.
 6. Confirm or reject each deterministic smell candidate.
-7. Produce an incremental refactoring plan before editing.
-8. Add characterization tests when coverage is insufficient.
-9. Apply one conceptual refactoring at a time.
-10. Run tests/static analysis after each meaningful change.
+7. Produce an incremental refactoring plan with isolated steps.
+8. Recommend characterization coverage when existing tests are insufficient.
+9. Identify validation and rollback considerations for every proposed step.
 
 ### Core rule
 
@@ -203,6 +273,4 @@ Use this order when an LLM consumes the report:
 
 Next iterations can add persistent path/mtime/hash index caching, method-level
 cyclomatic complexity, duplicate detection, architecture constraints, baseline
-comparison, MCP adapters for the reusable analysis services, and portable agent
-commands such as `/refactor:audit`, `/refactor:plan`, and
-`/refactor:architecture`.
+comparison, and an MCP server adapter for the existing reusable capabilities.
