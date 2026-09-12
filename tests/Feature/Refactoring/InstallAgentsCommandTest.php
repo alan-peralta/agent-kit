@@ -317,24 +317,36 @@ final class InstallAgentsCommandTest extends TestCase
 
         self::assertIsString($contents);
         self::assertStringContainsString('## Using Refactoring Agent with Coding Agents', $contents);
-        self::assertStringContainsString('agent-kit:agents:install', $contents);
-        self::assertStringContainsString('agent-kit:refactor-impact', $contents);
-        self::assertStringContainsString('MCP', $contents);
-        self::assertStringContainsString('Refactoring Core', $contents);
-        self::assertStringContainsString('Coding Agents', $contents);
-        self::assertStringContainsString('+--------------+--------------+', $contents);
+        self::assertStringContainsString(<<<'MARKDOWN'
+```bash
+php artisan agent-kit:agents:install cursor --path=/project
+php artisan agent-kit:agents:install claude --path=/project
+php artisan agent-kit:agents:install --all --path=/project
+```
+MARKDOWN, $contents);
+        self::assertStringContainsString(<<<'MARKDOWN'
+```text
+/refactor-audit
+/refactor-analyze <target>
+/refactor-callers <target>
+/refactor-dependencies <target>
+/refactor-impact <target>
+/refactor-plan <target>
+```
+MARKDOWN, $contents);
 
         foreach ([
-            '/refactor-audit',
-            '/refactor-analyze',
-            '/refactor-callers',
-            '/refactor-dependencies',
-            '/refactor-impact',
-            '/refactor-plan',
+            'php artisan agent-kit:refactor-audit /path/to/project',
+            'php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json',
+            'php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json --path=/project',
         ] as $command) {
             self::assertStringContainsString($command, $contents);
         }
 
+        self::assertSame(1, preg_match('/```text\s+Refactoring Core(?<diagram>.*?)```/s', $contents, $matches));
+        self::assertStringContainsString('CLI', $matches['diagram']);
+        self::assertStringContainsString('Coding Agents', $matches['diagram']);
+        self::assertStringContainsString('MCP', $matches['diagram']);
         self::assertStringContainsString('No `/refactor-apply` command is generated.', $contents);
     }
 

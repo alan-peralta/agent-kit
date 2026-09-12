@@ -265,14 +265,17 @@ O Agent Kit inclui um auditor inicial de refatoração para PHP/Laravel. Ele col
 
 ```bash
 php artisan agent-kit:refactor-audit
+php artisan agent-kit:refactor-audit /path/to/project
 php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
 php artisan agent-kit:refactor-callers "App\Services\PaymentService::charge"
 php artisan agent-kit:refactor-dependencies "App\Services\PaymentService"
-php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge"
+php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json --path=/project
 ```
 
-Use `--path=/caminho/do/projeto` para analisar outra raiz e `--json` para obter
-saída estruturada adequada a agentes e automações. Todos os comandos são
+Em `agent-kit:refactor-audit`, a raiz opcional é um argumento posicional, como
+em `php artisan agent-kit:refactor-audit /path/to/project`. Analyze, callers,
+dependencies e impact usam `--path=/project` para outra raiz. Use `--json` para
+obter saída estruturada adequada a agentes e automações. Todos os comandos são
 somente de análise: nenhum deles modifica o código examinado.
 
 Os relatórios de auditoria são gravados em `.agent-kit/refactoring/`. Veja
