@@ -442,6 +442,125 @@ PHP);
         }
     }
 
+    public function test_foreach_by_reference_persistently_taints_only_the_aliased_value(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'foreach-reference-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(array $items): void {
+        $service = new PaymentService();
+        foreach ($items as &$service) { $service->insideAlias(); }
+        $service = new PaymentService();
+        $service->afterForeachAlias();
+        $normal = new PaymentService();
+        foreach ($items as $normal) {}
+        $normal = new PaymentService();
+        $normal->afterNormalForeach();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['insideAlias', 'afterForeachAlias'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        $normal = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'afterNormalForeach'))[0];
+        $this->assertSame('Demo\\PaymentService', $normal->target);
+        $this->assertSame(Confidence::INFERRED, $normal->confidence);
+    }
+
+    public function test_global_bindings_persistently_taint_static_and_dynamic_targets(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'global-reference-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(string $name): void {
+        $service = new PaymentService();
+        global $service;
+        $service = new PaymentService();
+        $service->afterGlobal();
+        $other = new PaymentService();
+        global $$name;
+        $other = new PaymentService();
+        $other->afterDynamicGlobal();
+    }
+    public function freshScope(): void {
+        $service = new PaymentService();
+        $service->afterGlobalScope();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        foreach (['afterGlobal', 'afterDynamicGlobal'] as $method) {
+            $call = array_values(array_filter(
+                $parsed->references,
+                fn ($reference) => $reference->type === DependencyType::METHOD_CALL
+                    && $reference->targetMethod === $method,
+            ))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        $fresh = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL
+                && $reference->targetMethod === 'afterGlobalScope',
+        ))[0];
+        $this->assertSame('Demo\\PaymentService', $fresh->target);
+        $this->assertSame(Confidence::INFERRED, $fresh->confidence);
+    }
+
+    public function test_dynamic_variable_writes_invalidate_all_current_types_but_allow_later_proof(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'dynamic-write-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(string $name): void {
+        $service = new PaymentService();
+        $$name = new OtherService();
+        $service->afterVariableVariable();
+        $service = new PaymentService();
+        $service->afterSequentialProof();
+        $destructured = new PaymentService();
+        [$$name] = [];
+        $destructured->afterDynamicDestructuring();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterVariableVariable', 'afterDynamicDestructuring'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        $proven = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'afterSequentialProof'))[0];
+        $this->assertSame('Demo\\PaymentService', $proven->target);
+        $this->assertSame(Confidence::INFERRED, $proven->confidence);
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');

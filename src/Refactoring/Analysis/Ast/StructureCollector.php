@@ -25,6 +25,7 @@ final class StructureCollector extends NodeVisitorAbstract
     private array $localScopeStack = [];
     private array $conditionalScopes = [];
     private array $taintedLocals = [];
+    private bool $allLocalsTainted = false;
     private readonly NameContext $nameContext;
 
     public function __construct(
@@ -93,6 +94,9 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->enterLocalFunction($node);
         } elseif ($this->isUncertainControlFlow($node)) {
             $this->enterUncertainScope($node);
+            if ($node instanceof Node\Stmt\Foreach_ && $node->byRef) {
+                $this->taintWrittenTarget($node->valueVar);
+            }
             if ($node instanceof Node\Expr\NullsafeMethodCall) {
                 $this->collectMethodCall($node);
             }
@@ -104,6 +108,10 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->collectProperty($node);
         } elseif ($node instanceof Node\Stmt\ClassConst) {
             $this->collectConstants($node);
+        } elseif ($node instanceof Node\Stmt\Global_) {
+            foreach ($node->vars as $variable) {
+                $this->taintWrittenTarget($variable);
+            }
         } elseif ($node instanceof Node\Stmt\TraitUse) {
             foreach ($node->traits as $trait) {
                 $this->addReference($this->resolvedName($trait), null, DependencyType::TRAIT, Confidence::EXACT, $node);
@@ -154,7 +162,7 @@ final class StructureCollector extends NodeVisitorAbstract
         }
 
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
-            [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $byReference]
+            [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted, $byReference]
                 = array_pop($this->localScopeStack);
             $this->taintVariables($byReference);
         }
@@ -165,6 +173,7 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->localScopeStack = [];
             $this->conditionalScopes = [];
             $this->taintedLocals = [];
+            $this->allLocalsTainted = false;
         }
 
         if ($node instanceof Node\Stmt\ClassLike) {
@@ -181,7 +190,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 );
             }
 
-            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals]
+            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted]
                 = array_pop($this->classStack);
             $this->nameContext->set($this->currentClass, $this->currentParent);
         }
@@ -201,6 +210,7 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->localScopeStack,
             $this->conditionalScopes,
             $this->taintedLocals,
+            $this->allLocalsTainted,
         ];
 
         $namespacedName = $node->namespacedName;
@@ -213,6 +223,7 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->localScopeStack = [];
         $this->conditionalScopes = [];
         $this->taintedLocals = [];
+        $this->allLocalsTainted = false;
 
         $parent = $node instanceof Node\Stmt\Class_ ? $node->extends : null;
         $this->currentParent = $parent instanceof Node\Name ? $this->resolvedName($parent) : null;
@@ -293,6 +304,7 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->localScopeStack = [];
         $this->conditionalScopes = [];
         $this->taintedLocals = [];
+        $this->allLocalsTainted = false;
         $parameters = [];
 
         foreach ($node->params as $param) {
@@ -381,6 +393,9 @@ final class StructureCollector extends NodeVisitorAbstract
     private function collectAssignment(Node\Expr\Assign $node): void
     {
         $variables = $this->writtenVariables($node->var);
+        if ($this->hasUnresolvableWriteTarget($node->var)) {
+            $this->invalidateAllLocalTypes();
+        }
         if ($variables === []) {
             return;
         }
@@ -398,6 +413,7 @@ final class StructureCollector extends NodeVisitorAbstract
         }
 
         if ($target !== null
+            && !$this->allLocalsTainted
             && !isset($this->taintedLocals[$node->var->name])
             && !$this->isConditionallyWritten($node->var->name)) {
             $this->localTypes[$node->var->name] = $target;
@@ -408,6 +424,7 @@ final class StructureCollector extends NodeVisitorAbstract
     {
         $outerTypes = $this->localTypes;
         $outerTainted = $this->taintedLocals;
+        $outerAllTainted = $this->allLocalsTainted;
         $byReference = [];
         if ($node instanceof Node\Expr\Closure) {
             foreach ($node->uses as $use) {
@@ -416,10 +433,11 @@ final class StructureCollector extends NodeVisitorAbstract
                 }
             }
         }
-        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $outerTainted, $byReference];
+        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $outerTainted, $outerAllTainted, $byReference];
         $this->conditionalScopes = [];
         $this->localTypes = $node instanceof Node\Expr\ArrowFunction ? $outerTypes : [];
         $this->taintedLocals = $node instanceof Node\Expr\ArrowFunction ? $outerTainted : [];
+        $this->allLocalsTainted = false;
 
         if ($node instanceof Node\Expr\Closure) {
             foreach ($node->uses as $use) {
@@ -429,6 +447,9 @@ final class StructureCollector extends NodeVisitorAbstract
                 if (is_string($use->var->name) && isset($outerTainted[$use->var->name])) {
                     $this->taintedLocals[$use->var->name] = true;
                     unset($this->localTypes[$use->var->name]);
+                }
+                if (is_string($use->var->name) && $outerAllTainted) {
+                    $this->taintVariables([$use->var->name]);
                 }
             }
             $this->taintVariables($byReference);
@@ -453,7 +474,12 @@ final class StructureCollector extends NodeVisitorAbstract
             'types' => $this->localTypes,
             'assigned' => [],
         ];
-        $this->invalidateVariables($this->writtenVariablesIn($node));
+        $hasUnresolvableWrite = false;
+        $variables = $this->writtenVariablesIn($node, $hasUnresolvableWrite);
+        if ($hasUnresolvableWrite) {
+            $this->invalidateAllLocalTypes();
+        }
+        $this->invalidateVariables($variables);
     }
 
     private function leaveUncertainScope(): void
@@ -465,6 +491,9 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function invalidateWrittenTarget(Node\Expr $target): void
     {
+        if ($this->hasUnresolvableWriteTarget($target)) {
+            $this->invalidateAllLocalTypes();
+        }
         $this->invalidateVariables($this->writtenVariables($target));
     }
 
@@ -481,7 +510,21 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function taintWrittenTarget(Node\Expr $target): void
     {
+        if ($this->hasUnresolvableWriteTarget($target)) {
+            $this->taintAllLocalTypes();
+        }
         $this->taintVariables($this->writtenVariables($target));
+    }
+
+    private function invalidateAllLocalTypes(): void
+    {
+        $this->invalidateVariables(array_keys($this->localTypes));
+    }
+
+    private function taintAllLocalTypes(): void
+    {
+        $this->allLocalsTainted = true;
+        $this->invalidateAllLocalTypes();
     }
 
     /** @param list<string> $variables */
@@ -527,11 +570,35 @@ final class StructureCollector extends NodeVisitorAbstract
         return [];
     }
 
-    /** @return list<string> */
-    private function writtenVariablesIn(Node $root): array
+    private function hasUnresolvableWriteTarget(Node\Expr $target): bool
     {
+        if ($target instanceof Node\Expr\Variable) {
+            return !is_string($target->name);
+        }
+        if ($target instanceof Node\Expr\ArrayDimFetch) {
+            return $this->hasUnresolvableWriteTarget($target->var);
+        }
+        if ($target instanceof Node\Expr\Array_ || $target instanceof Node\Expr\List_) {
+            foreach ($target->items as $item) {
+                if ($item !== null && $this->hasUnresolvableWriteTarget($item->value)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** @return list<string> */
+    private function writtenVariablesIn(Node $root, ?bool &$hasUnresolvableWrite = null): array
+    {
+        $hasUnresolvableWrite = false;
         $variables = [];
-        $visit = function (Node $node, bool $isRoot = false) use (&$visit, &$variables): void {
+        $recordTarget = function (Node\Expr $target) use (&$variables, &$hasUnresolvableWrite): void {
+            $variables = array_merge($variables, $this->writtenVariables($target));
+            $hasUnresolvableWrite = $hasUnresolvableWrite || $this->hasUnresolvableWriteTarget($target);
+        };
+        $visit = function (Node $node, bool $isRoot = false) use (&$visit, $recordTarget): void {
             if (!$isRoot && ($node instanceof Node\Expr\Closure
                 || $node instanceof Node\Expr\ArrowFunction
                 || $node instanceof Node\Stmt\ClassLike)) {
@@ -544,23 +611,24 @@ final class StructureCollector extends NodeVisitorAbstract
                 || $node instanceof Node\Expr\PostInc
                 || $node instanceof Node\Expr\PreDec
                 || $node instanceof Node\Expr\PostDec) {
-                $variables = array_merge($variables, $this->writtenVariables($node->var));
+                $recordTarget($node->var);
             } elseif ($node instanceof Node\Expr\AssignRef) {
-                $variables = array_merge(
-                    $variables,
-                    $this->writtenVariables($node->var),
-                    $this->writtenVariables($node->expr),
-                );
+                $recordTarget($node->var);
+                $recordTarget($node->expr);
             } elseif ($node instanceof Node\Stmt\Foreach_) {
-                $variables = array_merge($variables, $this->writtenVariables($node->valueVar));
+                $recordTarget($node->valueVar);
                 if ($node->keyVar !== null) {
-                    $variables = array_merge($variables, $this->writtenVariables($node->keyVar));
+                    $recordTarget($node->keyVar);
                 }
             } elseif ($node instanceof Node\Stmt\Catch_ && $node->var !== null) {
-                $variables = array_merge($variables, $this->writtenVariables($node->var));
+                $recordTarget($node->var);
+            } elseif ($node instanceof Node\Stmt\Global_) {
+                foreach ($node->vars as $variable) {
+                    $recordTarget($variable);
+                }
             } elseif ($node instanceof Node\Stmt\Unset_) {
                 foreach ($node->vars as $variable) {
-                    $variables = array_merge($variables, $this->writtenVariables($variable));
+                    $recordTarget($variable);
                 }
             }
 
