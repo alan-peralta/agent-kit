@@ -93,6 +93,9 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->enterLocalFunction($node);
         } elseif ($this->isUncertainControlFlow($node)) {
             $this->enterUncertainScope($node);
+            if ($node instanceof Node\Expr\NullsafeMethodCall) {
+                $this->collectMethodCall($node);
+            }
         } elseif ($node instanceof Node\Stmt\ElseIf_ || $node instanceof Node\Stmt\Else_) {
             $this->localTypes = $this->conditionalScopes[array_key_last($this->conditionalScopes)]['types'];
         } elseif ($node instanceof Node\Stmt\ClassMethod) {
@@ -594,10 +597,12 @@ final class StructureCollector extends NodeVisitorAbstract
             || $node instanceof Node\Expr\BinaryOp\LogicalAnd
             || $node instanceof Node\Expr\BinaryOp\BooleanOr
             || $node instanceof Node\Expr\BinaryOp\LogicalOr
-            || $node instanceof Node\Expr\BinaryOp\Coalesce;
+            || $node instanceof Node\Expr\BinaryOp\Coalesce
+            || $node instanceof Node\Expr\NullsafeMethodCall
+            || $node instanceof Node\Expr\NullsafePropertyFetch;
     }
 
-    private function collectMethodCall(Node\Expr\MethodCall $node): void
+    private function collectMethodCall(Node\Expr\MethodCall|Node\Expr\NullsafeMethodCall $node): void
     {
         if (!$node->name instanceof Node\Identifier) {
             $this->addReference(null, null, DependencyType::METHOD_CALL, Confidence::UNKNOWN, $node);

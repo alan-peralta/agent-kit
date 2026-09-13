@@ -406,6 +406,42 @@ PHP);
         $this->assertSame(['constant_name_confidence' => 'unknown'], $constants[2]->metadata);
     }
 
+    public function test_nullsafe_argument_and_dynamic_property_writes_do_not_leak_receiver_types(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'nullsafe-write-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(?object $nullable): void {
+        $service = new PaymentService();
+        $nullable?->consume($service = new OtherService());
+        $service->afterNullsafe();
+        $propertyService = new PaymentService();
+        $nullable?->{get_debug_type($propertyService = new OtherService())};
+        $propertyService->afterNullsafeProperty();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        $nullsafe = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'consume'));
+        $this->assertCount(1, $nullsafe);
+        $this->assertNull($nullsafe[0]->target);
+        $this->assertSame(Confidence::UNKNOWN, $nullsafe[0]->confidence);
+        foreach (['afterNullsafe', 'afterNullsafeProperty'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');
