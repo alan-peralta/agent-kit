@@ -3,6 +3,7 @@
 namespace Peralta\AgentKit\Refactoring\Analysis\Index;
 
 use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParseDiagnostic;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\Reference;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyEdge;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyGraph;
@@ -42,8 +43,18 @@ final class CodebaseIndexer
             }
         }
 
+        ksort($classDeclarations, SORT_STRING);
         foreach ($classDeclarations as $declarations) {
             if (count($declarations) !== 1) {
+                $files = array_map(static fn ($declaration): string => $declaration->file, $declarations);
+                $message = sprintf(
+                    'Ambiguous class declaration for %s; declarations found in: %s.',
+                    ltrim($declarations[0]->fqcn, '\\'),
+                    implode(', ', $files),
+                );
+                foreach ($declarations as $declaration) {
+                    $diagnostics[] = new ParseDiagnostic($declaration->file, $declaration->line, $message);
+                }
                 continue;
             }
             $symbol = $declarations[0];
@@ -115,8 +126,6 @@ final class CodebaseIndexer
         }
 
         ksort($symbols, SORT_STRING);
-        ksort($classDeclarations, SORT_STRING);
-
         return new CodebaseIndex($symbols, $graph, $diagnostics, $unresolvedReferences, $classDeclarations);
     }
 

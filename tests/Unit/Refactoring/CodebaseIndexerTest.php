@@ -212,4 +212,32 @@ PHP);
             rmdir($root);
         }
     }
+
+    public function test_duplicate_declarations_without_edges_emit_deterministic_diagnostics(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-ambiguous-diagnostic-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service {}');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service {}');
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $diagnostics = array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics());
+            $this->assertSame(['First.php', 'Second.php'], array_column($diagnostics, 'file'));
+            $this->assertSame([1, 1], array_column($diagnostics, 'line'));
+            foreach ($diagnostics as $diagnostic) {
+                $this->assertStringContainsString('Ambiguous class declaration', $diagnostic['message']);
+                $this->assertStringContainsString('Demo\\Service', $diagnostic['message']);
+                $this->assertStringContainsString('First.php, Second.php', $diagnostic['message']);
+            }
+        } finally {
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
 }

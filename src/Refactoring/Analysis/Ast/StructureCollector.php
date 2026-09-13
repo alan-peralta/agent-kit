@@ -24,6 +24,7 @@ final class StructureCollector extends NodeVisitorAbstract
     private array $localTypes = [];
     private array $localScopeStack = [];
     private array $conditionalScopes = [];
+    private array $taintedLocals = [];
     private readonly NameContext $nameContext;
 
     public function __construct(
@@ -90,14 +91,8 @@ final class StructureCollector extends NodeVisitorAbstract
 
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
             $this->enterLocalFunction($node);
-        } elseif ($node instanceof Node\Stmt\If_ || $this->isLoop($node)) {
-            $this->enterUncertainScope();
-            if ($node instanceof Node\Stmt\Foreach_) {
-                $this->invalidateWrittenTarget($node->valueVar);
-                if ($node->keyVar !== null) {
-                    $this->invalidateWrittenTarget($node->keyVar);
-                }
-            }
+        } elseif ($this->isUncertainControlFlow($node)) {
+            $this->enterUncertainScope($node);
         } elseif ($node instanceof Node\Stmt\ElseIf_ || $node instanceof Node\Stmt\Else_) {
             $this->localTypes = $this->conditionalScopes[array_key_last($this->conditionalScopes)]['types'];
         } elseif ($node instanceof Node\Stmt\ClassMethod) {
@@ -124,8 +119,8 @@ final class StructureCollector extends NodeVisitorAbstract
         } elseif ($node instanceof Node\Expr\Assign) {
             $this->collectAssignment($node);
         } elseif ($node instanceof Node\Expr\AssignRef) {
-            $this->invalidateWrittenTarget($node->var);
-            $this->invalidateWrittenTarget($node->expr);
+            $this->taintWrittenTarget($node->var);
+            $this->taintWrittenTarget($node->expr);
         } elseif ($node instanceof Node\Expr\AssignOp
             || $node instanceof Node\Expr\PreInc
             || $node instanceof Node\Expr\PostInc
@@ -151,15 +146,14 @@ final class StructureCollector extends NodeVisitorAbstract
 
     public function leaveNode(Node $node): null
     {
-        if ($node instanceof Node\Stmt\If_ || $this->isLoop($node)) {
+        if ($this->isUncertainControlFlow($node)) {
             $this->leaveUncertainScope();
         }
 
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
-            [$this->localTypes, $this->conditionalScopes, $byReference] = array_pop($this->localScopeStack);
-            foreach ($byReference as $variable) {
-                $this->invalidateVariables([$variable]);
-            }
+            [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $byReference]
+                = array_pop($this->localScopeStack);
+            $this->taintVariables($byReference);
         }
 
         if ($node instanceof Node\Stmt\ClassMethod) {
@@ -167,6 +161,7 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->localTypes = [];
             $this->localScopeStack = [];
             $this->conditionalScopes = [];
+            $this->taintedLocals = [];
         }
 
         if ($node instanceof Node\Stmt\ClassLike) {
@@ -183,7 +178,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 );
             }
 
-            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes]
+            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals]
                 = array_pop($this->classStack);
             $this->nameContext->set($this->currentClass, $this->currentParent);
         }
@@ -202,6 +197,7 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->localTypes,
             $this->localScopeStack,
             $this->conditionalScopes,
+            $this->taintedLocals,
         ];
 
         $namespacedName = $node->namespacedName;
@@ -213,6 +209,7 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->localTypes = [];
         $this->localScopeStack = [];
         $this->conditionalScopes = [];
+        $this->taintedLocals = [];
 
         $parent = $node instanceof Node\Stmt\Class_ ? $node->extends : null;
         $this->currentParent = $parent instanceof Node\Name ? $this->resolvedName($parent) : null;
@@ -292,6 +289,7 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->localTypes = [];
         $this->localScopeStack = [];
         $this->conditionalScopes = [];
+        $this->taintedLocals = [];
         $parameters = [];
 
         foreach ($node->params as $param) {
@@ -396,7 +394,9 @@ final class StructureCollector extends NodeVisitorAbstract
             $target = $this->containerClassArgument($node->expr);
         }
 
-        if ($target !== null) {
+        if ($target !== null
+            && !isset($this->taintedLocals[$node->var->name])
+            && !$this->isConditionallyWritten($node->var->name)) {
             $this->localTypes[$node->var->name] = $target;
         }
     }
@@ -404,6 +404,7 @@ final class StructureCollector extends NodeVisitorAbstract
     private function enterLocalFunction(Node\Expr\Closure|Node\Expr\ArrowFunction $node): void
     {
         $outerTypes = $this->localTypes;
+        $outerTainted = $this->taintedLocals;
         $byReference = [];
         if ($node instanceof Node\Expr\Closure) {
             foreach ($node->uses as $use) {
@@ -412,16 +413,22 @@ final class StructureCollector extends NodeVisitorAbstract
                 }
             }
         }
-        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $byReference];
+        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $outerTainted, $byReference];
         $this->conditionalScopes = [];
         $this->localTypes = $node instanceof Node\Expr\ArrowFunction ? $outerTypes : [];
+        $this->taintedLocals = $node instanceof Node\Expr\ArrowFunction ? $outerTainted : [];
 
         if ($node instanceof Node\Expr\Closure) {
             foreach ($node->uses as $use) {
                 if (is_string($use->var->name) && isset($outerTypes[$use->var->name])) {
                     $this->localTypes[$use->var->name] = $outerTypes[$use->var->name];
                 }
+                if (is_string($use->var->name) && isset($outerTainted[$use->var->name])) {
+                    $this->taintedLocals[$use->var->name] = true;
+                    unset($this->localTypes[$use->var->name]);
+                }
             }
+            $this->taintVariables($byReference);
         }
 
         foreach ($node->params as $param) {
@@ -429,6 +436,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 continue;
             }
             unset($this->localTypes[$param->var->name]);
+            unset($this->taintedLocals[$param->var->name]);
             $types = $this->classTypes($param->type);
             if (count($types) === 1) {
                 $this->localTypes[$param->var->name] = $types[0];
@@ -436,12 +444,13 @@ final class StructureCollector extends NodeVisitorAbstract
         }
     }
 
-    private function enterUncertainScope(): void
+    private function enterUncertainScope(Node $node): void
     {
         $this->conditionalScopes[] = [
             'types' => $this->localTypes,
             'assigned' => [],
         ];
+        $this->invalidateVariables($this->writtenVariablesIn($node));
     }
 
     private function leaveUncertainScope(): void
@@ -454,6 +463,31 @@ final class StructureCollector extends NodeVisitorAbstract
     private function invalidateWrittenTarget(Node\Expr $target): void
     {
         $this->invalidateVariables($this->writtenVariables($target));
+    }
+
+    private function isConditionallyWritten(string $variable): bool
+    {
+        foreach ($this->conditionalScopes as $scope) {
+            if (isset($scope['assigned'][$variable])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function taintWrittenTarget(Node\Expr $target): void
+    {
+        $this->taintVariables($this->writtenVariables($target));
+    }
+
+    /** @param list<string> $variables */
+    private function taintVariables(array $variables): void
+    {
+        foreach ($variables as $variable) {
+            $this->taintedLocals[$variable] = true;
+        }
+        $this->invalidateVariables($variables);
     }
 
     /** @param list<string> $variables */
@@ -490,12 +524,77 @@ final class StructureCollector extends NodeVisitorAbstract
         return [];
     }
 
-    private function isLoop(Node $node): bool
+    /** @return list<string> */
+    private function writtenVariablesIn(Node $root): array
     {
-        return $node instanceof Node\Stmt\While_
+        $variables = [];
+        $visit = function (Node $node, bool $isRoot = false) use (&$visit, &$variables): void {
+            if (!$isRoot && ($node instanceof Node\Expr\Closure
+                || $node instanceof Node\Expr\ArrowFunction
+                || $node instanceof Node\Stmt\ClassLike)) {
+                return;
+            }
+
+            if ($node instanceof Node\Expr\Assign
+                || $node instanceof Node\Expr\AssignOp
+                || $node instanceof Node\Expr\PreInc
+                || $node instanceof Node\Expr\PostInc
+                || $node instanceof Node\Expr\PreDec
+                || $node instanceof Node\Expr\PostDec) {
+                $variables = array_merge($variables, $this->writtenVariables($node->var));
+            } elseif ($node instanceof Node\Expr\AssignRef) {
+                $variables = array_merge(
+                    $variables,
+                    $this->writtenVariables($node->var),
+                    $this->writtenVariables($node->expr),
+                );
+            } elseif ($node instanceof Node\Stmt\Foreach_) {
+                $variables = array_merge($variables, $this->writtenVariables($node->valueVar));
+                if ($node->keyVar !== null) {
+                    $variables = array_merge($variables, $this->writtenVariables($node->keyVar));
+                }
+            } elseif ($node instanceof Node\Stmt\Catch_ && $node->var !== null) {
+                $variables = array_merge($variables, $this->writtenVariables($node->var));
+            } elseif ($node instanceof Node\Stmt\Unset_) {
+                foreach ($node->vars as $variable) {
+                    $variables = array_merge($variables, $this->writtenVariables($variable));
+                }
+            }
+
+            foreach ($node->getSubNodeNames() as $name) {
+                $child = $node->{$name};
+                if ($child instanceof Node) {
+                    $visit($child);
+                } elseif (is_array($child)) {
+                    foreach ($child as $item) {
+                        if ($item instanceof Node) {
+                            $visit($item);
+                        }
+                    }
+                }
+            }
+        };
+        $visit($root, true);
+
+        return array_values(array_unique($variables));
+    }
+
+    private function isUncertainControlFlow(Node $node): bool
+    {
+        return $node instanceof Node\Stmt\If_
+            || $node instanceof Node\Stmt\While_
             || $node instanceof Node\Stmt\Do_
             || $node instanceof Node\Stmt\For_
-            || $node instanceof Node\Stmt\Foreach_;
+            || $node instanceof Node\Stmt\Foreach_
+            || $node instanceof Node\Stmt\Switch_
+            || $node instanceof Node\Stmt\TryCatch
+            || $node instanceof Node\Expr\Ternary
+            || $node instanceof Node\Expr\Match_
+            || $node instanceof Node\Expr\BinaryOp\BooleanAnd
+            || $node instanceof Node\Expr\BinaryOp\LogicalAnd
+            || $node instanceof Node\Expr\BinaryOp\BooleanOr
+            || $node instanceof Node\Expr\BinaryOp\LogicalOr
+            || $node instanceof Node\Expr\BinaryOp\Coalesce;
     }
 
     private function collectMethodCall(Node\Expr\MethodCall $node): void
@@ -555,22 +654,25 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function collectClassConstant(Node\Expr\ClassConstFetch $node): void
     {
-        if (!$node->class instanceof Node\Name || !$node->name instanceof Node\Identifier) {
+        if (!$node->class instanceof Node\Name && !$node->class instanceof Node\Expr) {
             return;
         }
 
-        $constant = $node->name->toString();
-        if (strtolower($constant) === 'class') {
+        $constant = $node->name instanceof Node\Identifier ? $node->name->toString() : null;
+        if ($node->class instanceof Node\Name && $constant !== null && strcasecmp($constant, 'class') === 0) {
             return;
         }
 
+        $target = $node->class instanceof Node\Name ? $this->resolvedName($node->class) : null;
         $this->addReference(
-            $this->resolvedName($node->class),
+            $target,
             null,
             DependencyType::CLASS_CONSTANT,
-            Confidence::EXACT,
+            $target === null ? Confidence::UNKNOWN : Confidence::EXACT,
             $node,
-            ['constant' => $constant],
+            $constant !== null
+                ? ['constant' => $constant]
+                : ['constant_name_confidence' => 'unknown'],
         );
     }
 

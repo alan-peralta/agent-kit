@@ -276,6 +276,136 @@ PHP);
         }
     }
 
+    public function test_alias_and_by_reference_capture_taint_persist_after_reassignment(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'persistent-alias-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(mixed $b): void {
+        $a = new PaymentService();
+        $a =& $b;
+        $a = new PaymentService();
+        $b = new OtherService();
+        $a->afterAlias();
+        $b->afterAliasPeer();
+        $captured = new PaymentService();
+        $mutate = function () use (&$captured): void { $captured = null; };
+        $captured = new PaymentService();
+        $captured->afterCapture();
+    }
+    public function freshScope(): void {
+        $a = new PaymentService();
+        $a->worksInNextMethod();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterAlias', 'afterAliasPeer', 'afterCapture'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        $fresh = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'worksInNextMethod'))[0];
+        $this->assertSame('Demo\\PaymentService', $fresh->target);
+        $this->assertSame(Confidence::INFERRED, $fresh->confidence);
+    }
+
+    public function test_writes_in_all_uncertain_control_flow_remain_unknown_after_the_construct(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'uncertain-control-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(int $choice, bool $condition): void {
+        $ternary = new PaymentService();
+        $condition ? $ternary = new OtherService() : null;
+        $ternary->afterTernary();
+        $switch = new PaymentService();
+        switch ($choice) { case 1: $switch = new OtherService(); break; default: break; }
+        $switch->afterSwitch();
+        $short = new PaymentService();
+        $condition && ($short = new OtherService());
+        $short->afterShortCircuit();
+        $coalesce = new PaymentService();
+        null ?? ($coalesce = new OtherService());
+        $coalesce->afterCoalesce();
+        $matched = new PaymentService();
+        match ($choice) { 1 => $matched = new OtherService(), default => null };
+        $matched->afterMatch();
+        $caught = new PaymentService();
+        try { risky(); } catch (\Throwable $caught) { recover(); } finally { cleanup(); }
+        $caught->afterCatch();
+        $tried = new PaymentService();
+        try { $tried = new OtherService(); } catch (\Throwable) {}
+        $tried->afterTry();
+        $unaffected = new PaymentService();
+        if ($condition) { $other = new OtherService(); }
+        $unaffected->stillKnown();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterTernary', 'afterSwitch', 'afterShortCircuit', 'afterCoalesce', 'afterMatch', 'afterCatch', 'afterTry'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        $unaffected = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'stillKnown'))[0];
+        $this->assertSame('Demo\\PaymentService', $unaffected->target);
+    }
+
+    public function test_dynamic_class_constant_references_preserve_every_known_fact(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'dynamic-constant-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(string $class, string $constant): void {
+        $one = $class::VALUE;
+        $two = KnownClass::{$constant};
+        $three = $class::{$constant};
+        $four = KnownClass::class;
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $constants = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::CLASS_CONSTANT,
+        ));
+        $this->assertCount(3, $constants);
+        $this->assertNull($constants[0]->target);
+        $this->assertSame(Confidence::UNKNOWN, $constants[0]->confidence);
+        $this->assertSame(['constant' => 'VALUE'], $constants[0]->metadata);
+        $this->assertSame('Demo\\KnownClass', $constants[1]->target);
+        $this->assertSame(Confidence::EXACT, $constants[1]->confidence);
+        $this->assertSame(['constant_name_confidence' => 'unknown'], $constants[1]->metadata);
+        $this->assertNull($constants[2]->target);
+        $this->assertSame(Confidence::UNKNOWN, $constants[2]->confidence);
+        $this->assertSame(['constant_name_confidence' => 'unknown'], $constants[2]->metadata);
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');

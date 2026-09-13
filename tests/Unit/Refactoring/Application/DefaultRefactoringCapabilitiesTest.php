@@ -400,6 +400,29 @@ PHP);
         }
     }
 
+    public function test_duplicate_declarations_without_relationships_still_make_each_file_incomplete(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-ambiguous-empty-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service {}');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service {}');
+
+        try {
+            foreach (['First.php', 'Second.php'] as $file) {
+                $result = $this->service()->analyze($root, $file);
+                $this->assertTrue($result->incomplete(), $file);
+                $this->assertCount(2, $result->diagnostics, $file);
+                $this->assertSame(['First.php', 'Second.php'], array_column($result->diagnostics, 'file'));
+                $this->assertSame([], $result->data['direct_callers']);
+                $this->assertSame('LOW', $result->data['risk']);
+            }
+        } finally {
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+
     public function test_edge_deduplication_keeps_same_line_events_with_distinct_metadata(): void
     {
         $root = sys_get_temp_dir() . '/agent-kit-edge-metadata-' . bin2hex(random_bytes(6));
