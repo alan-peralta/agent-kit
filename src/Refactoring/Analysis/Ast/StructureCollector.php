@@ -123,6 +123,9 @@ final class StructureCollector extends NodeVisitorAbstract
             }
         } elseif ($node instanceof Node\Expr\Assign) {
             $this->collectAssignment($node);
+        } elseif ($node instanceof Node\Expr\AssignRef) {
+            $this->invalidateWrittenTarget($node->var);
+            $this->invalidateWrittenTarget($node->expr);
         } elseif ($node instanceof Node\Expr\AssignOp
             || $node instanceof Node\Expr\PreInc
             || $node instanceof Node\Expr\PostInc

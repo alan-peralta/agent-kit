@@ -244,6 +244,38 @@ PHP);
         }
     }
 
+    public function test_assignment_by_reference_invalidates_the_previous_receiver_type(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'assign-ref-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(mixed $other): void {
+        $service = new PaymentService();
+        $service =& $other;
+        $service->charge();
+        $typed = new PaymentService();
+        $alias =& $typed;
+        $typed->refund();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        $this->assertSame(['charge', 'refund'], array_column($calls, 'targetMethod'));
+        foreach ($calls as $call) {
+            $this->assertNull($call->target);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence);
+        }
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');
