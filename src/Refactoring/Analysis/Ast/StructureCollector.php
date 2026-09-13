@@ -161,6 +161,10 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->leaveUncertainScope();
         }
 
+        if ($node instanceof Node\Expr\CallLike) {
+            $this->invalidateCallArguments($node);
+        }
+
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
             [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted, $byReference]
                 = array_pop($this->localScopeStack);
@@ -519,6 +523,34 @@ final class StructureCollector extends NodeVisitorAbstract
     private function invalidateAllLocalTypes(): void
     {
         $this->invalidateVariables(array_keys($this->localTypes));
+    }
+
+    private function invalidateCallArguments(Node\Expr\CallLike $call): void
+    {
+        foreach ($call->getRawArgs() as $argument) {
+            if (!$argument instanceof Node\Arg) {
+                continue;
+            }
+            if ($this->hasUnresolvableWriteTarget($argument->value)) {
+                $this->invalidateAllLocalTypes();
+            }
+            $this->invalidateVariables($this->argumentVariables($argument->value));
+        }
+    }
+
+    /** @return list<string> */
+    private function argumentVariables(Node\Expr $value): array
+    {
+        if ($value instanceof Node\Expr\Variable && is_string($value->name)) {
+            return [$value->name];
+        }
+        if ($value instanceof Node\Expr\ArrayDimFetch
+            || $value instanceof Node\Expr\PropertyFetch
+            || $value instanceof Node\Expr\NullsafePropertyFetch) {
+            return $this->argumentVariables($value->var);
+        }
+
+        return [];
     }
 
     private function taintAllLocalTypes(): void

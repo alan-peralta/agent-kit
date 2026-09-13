@@ -561,6 +561,71 @@ PHP);
         $this->assertSame(Confidence::INFERRED, $proven->confidence);
     }
 
+    public function test_call_arguments_are_invalidated_only_after_each_call_boundary(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'call-boundary-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(callable $callback, Mutator $mutator, ?Mutator $maybe): void {
+        $function = new PaymentService();
+        mutate($function);
+        $function->afterFunction();
+        $method = new PaymentService();
+        $mutator->change(value: $method);
+        $method->afterMethod();
+        $static = new PaymentService();
+        Mutator::change($static);
+        $static->afterStatic();
+        $dynamic = new PaymentService();
+        $callback($dynamic);
+        $dynamic->afterDynamicCallable();
+        $constructor = new PaymentService();
+        new Mutator($constructor);
+        $constructor->afterConstructor();
+        $nullsafe = new PaymentService();
+        $maybe?->change($nullsafe);
+        $nullsafe->afterNullsafeCall();
+        $arrayLvalue = new PaymentService();
+        mutate($arrayLvalue[0]);
+        $arrayLvalue->afterArrayLvalue();
+        $propertyLvalue = new PaymentService();
+        mutate($propertyLvalue->value);
+        $propertyLvalue->afterPropertyLvalue();
+        $preserved = new PaymentService();
+        mutateSomethingElse();
+        $preserved->afterNoArgument();
+        $receiver = new PaymentService();
+        $receiver->touch();
+        $receiver->afterReceiverOnly();
+        $restored = new PaymentService();
+        mutate($restored);
+        $restored = new PaymentService();
+        $restored->afterExplicitProof();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterFunction', 'afterMethod', 'afterStatic', 'afterDynamicCallable', 'afterConstructor', 'afterNullsafeCall', 'afterArrayLvalue', 'afterPropertyLvalue'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        foreach (['afterNoArgument', 'touch', 'afterReceiverOnly', 'afterExplicitProof'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertSame('Demo\\PaymentService', $call->target, $method);
+            $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
+        }
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');
