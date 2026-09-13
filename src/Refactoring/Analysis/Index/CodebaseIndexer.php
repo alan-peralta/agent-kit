@@ -7,6 +7,7 @@ use Peralta\AgentKit\Refactoring\Analysis\DTOs\Reference;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyEdge;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyGraph;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyNode;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\Confidence;
 use Peralta\AgentKit\Refactoring\Support\ProjectRoot;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
 
@@ -78,8 +79,26 @@ final class CodebaseIndexer
             }
             $sourceKey = strtolower(ltrim($reference->source, '\\'));
             $targetKey = strtolower(ltrim($reference->target, '\\'));
-            if (count($classDeclarations[$sourceKey] ?? []) > 1
-                || count($classDeclarations[$targetKey] ?? []) > 1) {
+            $ambiguousSource = count($classDeclarations[$sourceKey] ?? []) > 1;
+            $ambiguousTarget = count($classDeclarations[$targetKey] ?? []) > 1;
+            if ($ambiguousSource || $ambiguousTarget) {
+                $unresolvedReferences[] = new Reference(
+                    $reference->source,
+                    $reference->sourceMethod,
+                    null,
+                    null,
+                    $reference->type,
+                    Confidence::UNKNOWN,
+                    $reference->file,
+                    $reference->line,
+                    [
+                        'reason' => $ambiguousSource ? 'ambiguous_source' : 'ambiguous_target',
+                        'original_target' => $reference->target,
+                        'original_target_method' => $reference->targetMethod,
+                        'original_type' => $reference->type->value,
+                        'original_metadata' => $reference->metadata,
+                    ],
+                );
                 continue;
             }
             $graph->addEdge(new DependencyEdge(

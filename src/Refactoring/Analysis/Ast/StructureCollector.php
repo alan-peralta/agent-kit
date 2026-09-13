@@ -90,11 +90,14 @@ final class StructureCollector extends NodeVisitorAbstract
 
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
             $this->enterLocalFunction($node);
-        } elseif ($node instanceof Node\Stmt\If_) {
-            $this->conditionalScopes[] = [
-                'types' => $this->localTypes,
-                'assigned' => [],
-            ];
+        } elseif ($node instanceof Node\Stmt\If_ || $this->isLoop($node)) {
+            $this->enterUncertainScope();
+            if ($node instanceof Node\Stmt\Foreach_) {
+                $this->invalidateWrittenTarget($node->valueVar);
+                if ($node->keyVar !== null) {
+                    $this->invalidateWrittenTarget($node->keyVar);
+                }
+            }
         } elseif ($node instanceof Node\Stmt\ElseIf_ || $node instanceof Node\Stmt\Else_) {
             $this->localTypes = $this->conditionalScopes[array_key_last($this->conditionalScopes)]['types'];
         } elseif ($node instanceof Node\Stmt\ClassMethod) {
@@ -107,10 +110,29 @@ final class StructureCollector extends NodeVisitorAbstract
             foreach ($node->traits as $trait) {
                 $this->addReference($this->resolvedName($trait), null, DependencyType::TRAIT, Confidence::EXACT, $node);
             }
-        } elseif ($node instanceof Node\Expr\New_ && $node->class instanceof Node\Name) {
-            $this->addReference($this->resolvedName($node->class), null, DependencyType::INSTANTIATION, Confidence::EXACT, $node);
+        } elseif ($node instanceof Node\Expr\New_) {
+            $target = $node->class instanceof Node\Name ? $this->resolvedName($node->class) : null;
+            if ($target !== null || $node->class instanceof Node\Expr) {
+                $this->addReference(
+                    $target,
+                    null,
+                    DependencyType::INSTANTIATION,
+                    $target === null ? Confidence::UNKNOWN : Confidence::EXACT,
+                    $node,
+                );
+            }
         } elseif ($node instanceof Node\Expr\Assign) {
             $this->collectAssignment($node);
+        } elseif ($node instanceof Node\Expr\AssignOp
+            || $node instanceof Node\Expr\PreInc
+            || $node instanceof Node\Expr\PostInc
+            || $node instanceof Node\Expr\PreDec
+            || $node instanceof Node\Expr\PostDec) {
+            $this->invalidateWrittenTarget($node->var);
+        } elseif ($node instanceof Node\Stmt\Unset_) {
+            foreach ($node->vars as $variable) {
+                $this->invalidateWrittenTarget($variable);
+            }
         } elseif ($node instanceof Node\Expr\MethodCall) {
             $this->collectMethodCall($node);
         } elseif ($node instanceof Node\Expr\StaticCall) {
@@ -126,16 +148,15 @@ final class StructureCollector extends NodeVisitorAbstract
 
     public function leaveNode(Node $node): null
     {
-        if ($node instanceof Node\Stmt\If_) {
-            $scope = array_pop($this->conditionalScopes);
-            $this->localTypes = $scope['types'];
-            foreach (array_keys($scope['assigned']) as $variable) {
-                unset($this->localTypes[$variable]);
-            }
+        if ($node instanceof Node\Stmt\If_ || $this->isLoop($node)) {
+            $this->leaveUncertainScope();
         }
 
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
-            [$this->localTypes, $this->conditionalScopes] = array_pop($this->localScopeStack);
+            [$this->localTypes, $this->conditionalScopes, $byReference] = array_pop($this->localScopeStack);
+            foreach ($byReference as $variable) {
+                $this->invalidateVariables([$variable]);
+            }
         }
 
         if ($node instanceof Node\Stmt\ClassMethod) {
@@ -355,12 +376,14 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function collectAssignment(Node\Expr\Assign $node): void
     {
-        if (!$node->var instanceof Node\Expr\Variable || !is_string($node->var->name)) {
+        $variables = $this->writtenVariables($node->var);
+        if ($variables === []) {
             return;
         }
 
-        foreach (array_keys($this->conditionalScopes) as $index) {
-            $this->conditionalScopes[$index]['assigned'][$node->var->name] = true;
+        $this->invalidateVariables($variables);
+        if (!$node->var instanceof Node\Expr\Variable || !is_string($node->var->name)) {
+            return;
         }
 
         $target = null;
@@ -372,15 +395,21 @@ final class StructureCollector extends NodeVisitorAbstract
 
         if ($target !== null) {
             $this->localTypes[$node->var->name] = $target;
-        } else {
-            unset($this->localTypes[$node->var->name]);
         }
     }
 
     private function enterLocalFunction(Node\Expr\Closure|Node\Expr\ArrowFunction $node): void
     {
         $outerTypes = $this->localTypes;
-        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes];
+        $byReference = [];
+        if ($node instanceof Node\Expr\Closure) {
+            foreach ($node->uses as $use) {
+                if ($use->byRef && is_string($use->var->name)) {
+                    $byReference[] = $use->var->name;
+                }
+            }
+        }
+        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $byReference];
         $this->conditionalScopes = [];
         $this->localTypes = $node instanceof Node\Expr\ArrowFunction ? $outerTypes : [];
 
@@ -404,6 +433,68 @@ final class StructureCollector extends NodeVisitorAbstract
         }
     }
 
+    private function enterUncertainScope(): void
+    {
+        $this->conditionalScopes[] = [
+            'types' => $this->localTypes,
+            'assigned' => [],
+        ];
+    }
+
+    private function leaveUncertainScope(): void
+    {
+        $scope = array_pop($this->conditionalScopes);
+        $this->localTypes = $scope['types'];
+        $this->invalidateVariables(array_keys($scope['assigned']));
+    }
+
+    private function invalidateWrittenTarget(Node\Expr $target): void
+    {
+        $this->invalidateVariables($this->writtenVariables($target));
+    }
+
+    /** @param list<string> $variables */
+    private function invalidateVariables(array $variables): void
+    {
+        foreach ($variables as $variable) {
+            foreach (array_keys($this->conditionalScopes) as $index) {
+                $this->conditionalScopes[$index]['assigned'][$variable] = true;
+            }
+            unset($this->localTypes[$variable]);
+        }
+    }
+
+    /** @return list<string> */
+    private function writtenVariables(Node\Expr $target): array
+    {
+        if ($target instanceof Node\Expr\Variable && is_string($target->name)) {
+            return [$target->name];
+        }
+        if ($target instanceof Node\Expr\ArrayDimFetch) {
+            return $this->writtenVariables($target->var);
+        }
+        if ($target instanceof Node\Expr\Array_ || $target instanceof Node\Expr\List_) {
+            $variables = [];
+            foreach ($target->items as $item) {
+                if ($item !== null) {
+                    $variables = array_merge($variables, $this->writtenVariables($item->value));
+                }
+            }
+
+            return array_values(array_unique($variables));
+        }
+
+        return [];
+    }
+
+    private function isLoop(Node $node): bool
+    {
+        return $node instanceof Node\Stmt\While_
+            || $node instanceof Node\Stmt\Do_
+            || $node instanceof Node\Stmt\For_
+            || $node instanceof Node\Stmt\Foreach_;
+    }
+
     private function collectMethodCall(Node\Expr\MethodCall $node): void
     {
         if (!$node->name instanceof Node\Identifier) {
@@ -413,7 +504,7 @@ final class StructureCollector extends NodeVisitorAbstract
         }
 
         $method = $node->name->toString();
-        if ($method === 'make' && $this->isAppCall($node->var)) {
+        if (strcasecmp($method, 'make') === 0 && $this->isAppCall($node->var)) {
             $target = $this->classNameArgument($node->args[0]->value ?? null);
             $this->addReference(
                 $target,
@@ -442,11 +533,14 @@ final class StructureCollector extends NodeVisitorAbstract
         $target = $this->resolvedName($node->class);
         $method = $node->name->toString();
 
-        if ($method === 'dispatch') {
+        if (strcasecmp($method, 'dispatch') === 0) {
             $dispatched = $this->newClassArgument($node->args[0]->value ?? null);
             if ($dispatched !== null) {
-                $kind = $target === 'Illuminate\\Support\\Facades\\Event' ? 'event' : 'job';
+                $kind = strcasecmp((string) $target, 'Illuminate\\Support\\Facades\\Event') === 0 ? 'event' : 'job';
                 $this->addReference($dispatched, null, DependencyType::EVENT, Confidence::EXACT, $node, ['dispatch_kind' => $kind]);
+            } elseif ($this->isFacade($target)) {
+                $kind = strcasecmp((string) $target, 'Illuminate\\Support\\Facades\\Event') === 0 ? 'event' : 'job';
+                $this->addReference(null, null, DependencyType::EVENT, Confidence::UNKNOWN, $node, ['dispatch_kind' => $kind]);
             } elseif (!$this->isFacade($target)) {
                 $this->addReference($target, null, DependencyType::EVENT, Confidence::EXACT, $node, ['dispatch_kind' => 'job']);
             }
@@ -543,13 +637,14 @@ final class StructureCollector extends NodeVisitorAbstract
     {
         if ($expression instanceof Node\Expr\FuncCall
             && $expression->name instanceof Node\Name
+            && count($expression->name->getParts()) === 1
             && in_array(strtolower($expression->name->getLast()), ['app', 'resolve'], true)) {
             return $this->classNameArgument($expression->args[0]->value ?? null);
         }
 
         if ($expression instanceof Node\Expr\MethodCall
             && $expression->name instanceof Node\Identifier
-            && $expression->name->toString() === 'make'
+            && strcasecmp($expression->name->toString(), 'make') === 0
             && $this->isAppCall($expression->var)) {
             return $this->classNameArgument($expression->args[0]->value ?? null);
         }
@@ -580,6 +675,7 @@ final class StructureCollector extends NodeVisitorAbstract
     {
         return $expression instanceof Node\Expr\FuncCall
             && $expression->name instanceof Node\Name
+            && count($expression->name->getParts()) === 1
             && strtolower($expression->name->getLast()) === 'app';
     }
 
@@ -589,7 +685,7 @@ final class StructureCollector extends NodeVisitorAbstract
             return false;
         }
         foreach ($this->facadePrefixes as $prefix) {
-            if (str_starts_with($fqcn, $prefix)) {
+            if (str_starts_with(strtolower($fqcn), strtolower($prefix))) {
                 return true;
             }
         }

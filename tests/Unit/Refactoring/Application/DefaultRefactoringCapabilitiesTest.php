@@ -368,6 +368,64 @@ PHP);
         }
     }
 
+    public function test_duplicate_declaration_file_analysis_reports_omitted_edges_as_incomplete(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-ambiguous-incomplete-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Consumer.php', '<?php namespace Demo; class Consumer { function run(Service $service): void { $service->go(); } }');
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service { function go(): void {} }');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service { function go(): void {} }');
+
+        try {
+            $result = $this->service()->analyze($root, 'First.php');
+
+            $this->assertTrue($result->incomplete());
+            $this->assertNotEmpty($result->unresolved);
+            $this->assertContains('ambiguous_target', array_column(array_column($result->unresolved, 'metadata'), 'reason'));
+            $this->assertSame([], $result->data['direct_callers']);
+            foreach (['findCallers', 'dependencies', 'impact'] as $operation) {
+                $consumer = $this->service()->{$operation}($root, 'Demo\\Consumer');
+                $this->assertTrue($consumer->incomplete(), $operation);
+                $this->assertContains(
+                    'ambiguous_target',
+                    array_column(array_column($consumer->unresolved, 'metadata'), 'reason'),
+                    $operation,
+                );
+            }
+        } finally {
+            unlink($root . '/Consumer.php');
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_edge_deduplication_keeps_same_line_events_with_distinct_metadata(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-edge-metadata-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Publisher.php', '<?php namespace Demo; class Publisher { function run(): void { event(new Message()); dispatch(new Message()); } }');
+        file_put_contents($root . '/Message.php', '<?php namespace Demo; class Message {}');
+
+        try {
+            $result = $this->service()->analyze($root, 'Demo\\Publisher');
+            $events = array_values(array_filter(
+                $result->data['upstream_dependencies'],
+                fn (array $edge) => $edge['type'] === 'event',
+            ));
+
+            $this->assertCount(2, $events);
+            $this->assertSame(
+                [['dispatch_kind' => 'event'], ['dispatch_kind' => 'job']],
+                array_column($events, 'metadata'),
+            );
+        } finally {
+            unlink($root . '/Publisher.php');
+            unlink($root . '/Message.php');
+            rmdir($root);
+        }
+    }
+
     public function test_it_aggregates_relationships_for_every_symbol_in_a_file(): void
     {
         $result = $this->service(

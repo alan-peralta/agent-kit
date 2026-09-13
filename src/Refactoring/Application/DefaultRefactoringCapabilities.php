@@ -360,7 +360,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
 
     private function uniqueEdges(array $edges): array
     {
-        return $this->uniqueRows($edges, static fn (array $edge): string => implode("\0", [
+        return $this->uniqueRows($edges, fn (array $edge): string => implode("\0", [
             $edge['source'],
             $edge['source_method'] ?? '',
             $edge['target'],
@@ -368,6 +368,8 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             $edge['type'],
             $edge['file'],
             (string) $edge['line'],
+            $edge['confidence'],
+            json_encode($this->canonicalMetadata($edge['metadata']), JSON_THROW_ON_ERROR),
         ]));
     }
 
@@ -388,5 +390,22 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         ksort($unique, SORT_STRING);
 
         return array_values($unique);
+    }
+
+    private function canonicalMetadata(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if (array_is_list($value)) {
+            return array_map($this->canonicalMetadata(...), $value);
+        }
+
+        ksort($value, SORT_STRING);
+        foreach ($value as $key => $item) {
+            $value[$key] = $this->canonicalMetadata($item);
+        }
+
+        return $value;
     }
 }

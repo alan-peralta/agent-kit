@@ -174,4 +174,42 @@ PHP);
             rmdir($root);
         }
     }
+
+    public function test_edges_omitted_for_ambiguous_declarations_are_retained_as_unresolved_evidence(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-ambiguous-edge-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Consumer.php', '<?php namespace Demo; class Consumer { function run(Service $service): void { $service->go(); } }');
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service { function go(): void {} }');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service { function go(): void {} }');
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertSame([], $index->findReferencesTo('Demo\\Service'));
+            $ambiguous = array_values(array_filter(
+                $index->unresolvedReferences(),
+                fn (array $reference) => ($reference['metadata']['reason'] ?? null) === 'ambiguous_target',
+            ));
+            $this->assertCount(2, $ambiguous);
+            $this->assertSame(
+                ['method_parameter', 'method_call'],
+                array_column($ambiguous, 'type'),
+            );
+            foreach ($ambiguous as $reference) {
+                $this->assertNull($reference['target']);
+                $this->assertSame('unknown', $reference['confidence']);
+                $this->assertSame('Demo\\Service', $reference['metadata']['original_target']);
+                $this->assertArrayHasKey('original_metadata', $reference['metadata']);
+            }
+        } finally {
+            unlink($root . '/Consumer.php');
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
 }
