@@ -614,15 +614,74 @@ PHP);
             $parsed->references,
             fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
         ));
-        foreach (['afterFunction', 'afterMethod', 'afterStatic', 'afterDynamicCallable', 'afterConstructor', 'afterNullsafeCall', 'afterArrayLvalue', 'afterPropertyLvalue'] as $method) {
+        foreach (['afterFunction', 'afterMethod', 'afterStatic', 'afterDynamicCallable', 'afterConstructor', 'afterNullsafeCall'] as $method) {
             $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
             $this->assertNull($call->target, $method);
             $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
         }
-        foreach (['afterNoArgument', 'touch', 'afterReceiverOnly', 'afterExplicitProof'] as $method) {
+        foreach (['afterArrayLvalue', 'afterPropertyLvalue', 'afterNoArgument', 'touch', 'afterReceiverOnly', 'afterExplicitProof'] as $method) {
             $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
             $this->assertSame('Demo\\PaymentService', $call->target, $method);
             $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
+        }
+    }
+
+    public function test_inline_callable_signatures_only_invalidate_arguments_mapped_to_by_reference_parameters(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'visible-callable-boundary-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(): void {
+        $closureValue = new PaymentService();
+        (function ($value): void {})($closureValue);
+        $closureValue->afterClosureValue();
+        $closureRef = new PaymentService();
+        (function (&$value): void {})($closureRef);
+        $closureRef->afterClosureRef();
+        $arrowValue = new PaymentService();
+        (fn ($value) => null)($arrowValue);
+        $arrowValue->afterArrowValue();
+        $arrowRef = new PaymentService();
+        (fn (&$value) => null)($arrowRef);
+        $arrowRef->afterArrowRef();
+        $namedValue = new PaymentService();
+        $namedRef = new PaymentService();
+        (function ($first, &$second): void {})(second: $namedRef, first: $namedValue);
+        $namedValue->afterNamedValue();
+        $namedRef->afterNamedRef();
+        $variadicOne = new PaymentService();
+        $variadicTwo = new PaymentService();
+        (function (&...$values): void {})($variadicOne, $variadicTwo);
+        $variadicOne->afterVariadicOne();
+        $variadicTwo->afterVariadicTwo();
+        $variadicValue = new PaymentService();
+        (function (...$values): void {})($variadicValue);
+        $variadicValue->afterVariadicValue();
+        $extraValue = new PaymentService();
+        (function (): void {})($extraValue);
+        $extraValue->afterExtraValue();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterClosureValue', 'afterArrowValue', 'afterNamedValue', 'afterVariadicValue', 'afterExtraValue'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertSame('Demo\\PaymentService', $call->target, $method);
+            $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
+        }
+        foreach (['afterClosureRef', 'afterArrowRef', 'afterNamedRef', 'afterVariadicOne', 'afterVariadicTwo'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
         }
     }
 

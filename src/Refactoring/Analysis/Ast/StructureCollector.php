@@ -527,30 +527,83 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function invalidateCallArguments(Node\Expr\CallLike $call): void
     {
-        foreach ($call->getRawArgs() as $argument) {
-            if (!$argument instanceof Node\Arg) {
-                continue;
+        if ($call instanceof Node\Expr\FuncCall
+            && ($call->name instanceof Node\Expr\Closure || $call->name instanceof Node\Expr\ArrowFunction)
+            && $this->invalidateVisibleCallableArguments($call->name->params, $call->getRawArgs())) {
+            return;
+        }
+
+        $this->invalidateDirectArguments($call->getRawArgs());
+    }
+
+    /**
+     * @param list<Node\Param> $parameters
+     * @param list<Node\Arg|Node\VariadicPlaceholder> $arguments
+     */
+    private function invalidateVisibleCallableArguments(array $parameters, array $arguments): bool
+    {
+        $byName = [];
+        $variadic = null;
+        foreach ($parameters as $index => $parameter) {
+            if (!$parameter->var instanceof Node\Expr\Variable || !is_string($parameter->var->name)) {
+                return false;
             }
-            if ($this->hasUnresolvableWriteTarget($argument->value)) {
-                $this->invalidateAllLocalTypes();
+            $byName[$parameter->var->name] = $index;
+            if ($parameter->variadic) {
+                $variadic = $index;
             }
-            $this->invalidateVariables($this->argumentVariables($argument->value));
+        }
+
+        $position = 0;
+        $namedArgumentSeen = false;
+        foreach ($arguments as $argument) {
+            if (!$argument instanceof Node\Arg || $argument->unpack) {
+                return false;
+            }
+
+            if ($argument->name !== null) {
+                $namedArgumentSeen = true;
+                $index = $byName[$argument->name->toString()] ?? $variadic;
+            } else {
+                if ($namedArgumentSeen) {
+                    return false;
+                }
+                if ($position >= count($parameters) && $variadic === null) {
+                    continue;
+                }
+                $index = $position < count($parameters) ? $position : $variadic;
+                if ($index !== $variadic) {
+                    $position++;
+                }
+            }
+
+            if ($index === null) {
+                return false;
+            }
+            $parameter = $parameters[$index];
+            if ($parameter->byRef) {
+                $this->invalidateDirectArgument($argument);
+            }
+        }
+
+        return true;
+    }
+
+    /** @param list<Node\Arg|Node\VariadicPlaceholder> $arguments */
+    private function invalidateDirectArguments(array $arguments): void
+    {
+        foreach ($arguments as $argument) {
+            if ($argument instanceof Node\Arg) {
+                $this->invalidateDirectArgument($argument);
+            }
         }
     }
 
-    /** @return list<string> */
-    private function argumentVariables(Node\Expr $value): array
+    private function invalidateDirectArgument(Node\Arg $argument): void
     {
-        if ($value instanceof Node\Expr\Variable && is_string($value->name)) {
-            return [$value->name];
+        if ($argument->value instanceof Node\Expr\Variable && is_string($argument->value->name)) {
+            $this->invalidateVariables([$argument->value->name]);
         }
-        if ($value instanceof Node\Expr\ArrayDimFetch
-            || $value instanceof Node\Expr\PropertyFetch
-            || $value instanceof Node\Expr\NullsafePropertyFetch) {
-            return $this->argumentVariables($value->var);
-        }
-
-        return [];
     }
 
     private function taintAllLocalTypes(): void
