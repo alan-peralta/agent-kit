@@ -764,6 +764,55 @@ PHP);
         $this->assertSame(Confidence::UNKNOWN, $direct->confidence);
     }
 
+    public function test_inline_callable_mapping_keeps_precise_arguments_when_mixed_with_unpack(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'mixed-unpack-call-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(): void {
+        $directValue = new PaymentService();
+        $spread = new PaymentService();
+        (function ($value, &...$rest): void {})($directValue, ...$spread);
+        $directValue->afterDirectValueBeforeSpread();
+        $spread->afterFirstSpread();
+        $directRef = new PaymentService();
+        $spreadTwo = new PaymentService();
+        (function (&$value, ...$rest): void {})($directRef, ...$spreadTwo);
+        $directRef->afterDirectRefBeforeSpread();
+        $spreadTwo->afterSecondSpread();
+        $namedValue = new PaymentService();
+        $namedRef = new PaymentService();
+        $spreadThree = new PaymentService();
+        (function ($first, &$second, ...$rest): void {})(...$spreadThree, first: $namedValue, second: $namedRef);
+        $namedValue->afterNamedValueAfterSpread();
+        $namedRef->afterNamedRefAfterSpread();
+        $spreadThree->afterNamedSpread();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+        $this->assertSame([], $parsed->diagnostics);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterDirectValueBeforeSpread', 'afterFirstSpread', 'afterSecondSpread', 'afterNamedValueAfterSpread', 'afterNamedSpread'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertSame('Demo\\PaymentService', $call->target, $method);
+            $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
+        }
+        foreach (['afterDirectRefBeforeSpread', 'afterNamedRefAfterSpread'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');

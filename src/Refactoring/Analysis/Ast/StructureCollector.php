@@ -556,17 +556,28 @@ final class StructureCollector extends NodeVisitorAbstract
 
         $position = 0;
         $namedArgumentSeen = false;
+        $positionAmbiguous = false;
         foreach ($arguments as $argument) {
-            if (!$argument instanceof Node\Arg || $argument->unpack) {
+            if ($argument instanceof Node\VariadicPlaceholder) {
+                continue;
+            }
+            if (!$argument instanceof Node\Arg) {
                 return false;
+            }
+            if ($argument->unpack) {
+                $positionAmbiguous = true;
+
+                continue;
             }
 
             if ($argument->name !== null) {
                 $namedArgumentSeen = true;
                 $index = $byName[$argument->name->toString()] ?? $variadic;
             } else {
-                if ($namedArgumentSeen) {
-                    return false;
+                if ($namedArgumentSeen || $positionAmbiguous) {
+                    $this->invalidateDirectArgument($argument);
+
+                    continue;
                 }
                 if ($position >= count($parameters) && $variadic === null) {
                     continue;
@@ -578,7 +589,9 @@ final class StructureCollector extends NodeVisitorAbstract
             }
 
             if ($index === null) {
-                return false;
+                $this->invalidateDirectArgument($argument);
+
+                continue;
             }
             $parameter = $parameters[$index];
             if ($parameter->byRef) {
