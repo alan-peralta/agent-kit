@@ -601,9 +601,15 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function invalidateDirectArgument(Node\Arg $argument): void
     {
-        if ($argument->value instanceof Node\Expr\Variable && is_string($argument->value->name)) {
-            $this->invalidateVariables([$argument->value->name]);
+        if (!$argument->value instanceof Node\Expr\Variable) {
+            return;
         }
+        if (!is_string($argument->value->name)) {
+            $this->invalidateAllLocalTypes();
+
+            return;
+        }
+        $this->invalidateVariables([$argument->value->name]);
     }
 
     private function taintAllLocalTypes(): void

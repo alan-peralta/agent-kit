@@ -685,6 +685,44 @@ PHP);
         }
     }
 
+    public function test_dynamic_direct_arguments_only_clear_all_types_at_unknown_or_by_reference_boundaries(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'dynamic-call-argument-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(string $name): void {
+        $opaque = new PaymentService();
+        mutate($$name);
+        $opaque->afterOpaqueDynamic();
+        $inlineValue = new PaymentService();
+        (function ($value): void {})($$name);
+        $inlineValue->afterInlineDynamicValue();
+        $inlineRef = new PaymentService();
+        (function (&$value): void {})($$name);
+        $inlineRef->afterInlineDynamicRef();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterOpaqueDynamic', 'afterInlineDynamicRef'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        $byValue = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'afterInlineDynamicValue'))[0];
+        $this->assertSame('Demo\\PaymentService', $byValue->target);
+        $this->assertSame(Confidence::INFERRED, $byValue->confidence);
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');
