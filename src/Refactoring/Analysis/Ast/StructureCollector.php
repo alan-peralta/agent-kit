@@ -601,6 +601,9 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function invalidateDirectArgument(Node\Arg $argument): void
     {
+        if ($argument->unpack) {
+            return;
+        }
         if (!$argument->value instanceof Node\Expr\Variable) {
             return;
         }

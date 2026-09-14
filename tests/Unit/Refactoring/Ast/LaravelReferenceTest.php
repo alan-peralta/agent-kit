@@ -723,6 +723,47 @@ PHP);
         $this->assertSame(Confidence::INFERRED, $byValue->confidence);
     }
 
+    public function test_unpacked_arguments_never_rebind_the_spread_container_identity(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'unpacked-call-argument-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function run(string $name): void {
+        $spread = new PaymentService();
+        mutate(...$spread);
+        $spread->afterOpaqueSpread();
+        $inline = new PaymentService();
+        (function (&...$values): void {})(...$inline);
+        $inline->afterInlineSpread();
+        $other = new PaymentService();
+        mutate(...$$name);
+        $other->afterDynamicSpread();
+        $direct = new PaymentService();
+        mutate($direct);
+        $direct->afterDirectArgument();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterOpaqueSpread', 'afterInlineSpread', 'afterDynamicSpread'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertSame('Demo\\PaymentService', $call->target, $method);
+            $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
+        }
+        $direct = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'afterDirectArgument'))[0];
+        $this->assertNull($direct->target);
+        $this->assertSame(Confidence::UNKNOWN, $direct->confidence);
+    }
+
     public function test_dynamic_new_and_dynamic_facade_dispatches_are_explicitly_unresolved(): void
     {
         $file = tempnam(sys_get_temp_dir(), 'dynamic-dispatch-php-');
