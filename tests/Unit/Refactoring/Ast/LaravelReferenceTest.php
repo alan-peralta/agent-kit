@@ -619,7 +619,91 @@ PHP);
             $this->assertNull($call->target, $method);
             $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
         }
-        foreach (['afterArrayLvalue', 'afterPropertyLvalue', 'afterNoArgument', 'touch', 'afterReceiverOnly', 'afterExplicitProof'] as $method) {
+        foreach (['afterArrayLvalue', 'afterPropertyLvalue', 'afterNoArgument', 'touch', 'afterReceiverOnly'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertSame('Demo\\PaymentService', $call->target, $method);
+            $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
+        }
+        $escaped = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === 'afterExplicitProof'))[0];
+        $this->assertNull($escaped->target);
+        $this->assertSame(Confidence::UNKNOWN, $escaped->confidence);
+    }
+
+    public function test_call_boundaries_persist_reference_escape_taint_within_only_the_current_scope(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'persistent-call-taint-php-');
+        file_put_contents($file, <<<'PHP'
+<?php
+namespace Demo;
+final class Service {
+    public function tainted(string $name): void {
+        $retained = new PaymentService();
+        retainReference($retained);
+        $retained = new PaymentService();
+        mutateHeldReference();
+        $retained->afterRetainedReference();
+
+        $inlineRef = new PaymentService();
+        (function (&$value): void {})($inlineRef);
+        $inlineRef = new PaymentService();
+        $inlineRef->afterInlineReference();
+
+        $inlineValue = new OtherService();
+        (function ($value): void {})($inlineValue);
+        $inlineValue = new PaymentService();
+        $inlineValue->afterInlineValueReassignment();
+
+        $different = new PaymentService();
+        $different->afterDifferentLocal();
+
+        $spread = new PaymentService();
+        retainReference(...$spread);
+        $spread = new PaymentService();
+        $spread->afterSpread();
+
+        $dynamic = new PaymentService();
+        retainReference($$name);
+        $dynamic = new PaymentService();
+        $dynamic->afterDynamicEscape();
+    }
+
+    public function freshMethod(): void {
+        $retained = new PaymentService();
+        $retained->afterFreshMethod();
+
+        $outer = new PaymentService();
+        $closure = function (): void {
+            $inner = new PaymentService();
+            retainReference($inner);
+            $inner = new PaymentService();
+            $inner->afterInnerEscape();
+        };
+        $outer = new PaymentService();
+        $outer->afterClosureScope();
+    }
+}
+final class OtherClass {
+    public function freshClass(): void {
+        $retained = new PaymentService();
+        $retained->afterFreshClass();
+    }
+}
+PHP);
+
+        $parsed = (new PhpAstParser())->parse($file, 'Service.php');
+        unlink($file);
+        $this->assertSame([], $parsed->diagnostics);
+
+        $calls = array_values(array_filter(
+            $parsed->references,
+            fn ($reference) => $reference->type === DependencyType::METHOD_CALL,
+        ));
+        foreach (['afterRetainedReference', 'afterInlineReference', 'afterDynamicEscape', 'afterInnerEscape'] as $method) {
+            $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
+            $this->assertNull($call->target, $method);
+            $this->assertSame(Confidence::UNKNOWN, $call->confidence, $method);
+        }
+        foreach (['afterInlineValueReassignment', 'afterDifferentLocal', 'afterSpread', 'afterFreshMethod', 'afterClosureScope', 'afterFreshClass'] as $method) {
             $call = array_values(array_filter($calls, fn ($reference) => $reference->targetMethod === $method))[0];
             $this->assertSame('Demo\\PaymentService', $call->target, $method);
             $this->assertSame(Confidence::INFERRED, $call->confidence, $method);
@@ -693,12 +777,12 @@ PHP);
 namespace Demo;
 final class Service {
     public function run(string $name): void {
-        $opaque = new PaymentService();
-        mutate($$name);
-        $opaque->afterOpaqueDynamic();
         $inlineValue = new PaymentService();
         (function ($value): void {})($$name);
         $inlineValue->afterInlineDynamicValue();
+        $opaque = new PaymentService();
+        mutate($$name);
+        $opaque->afterOpaqueDynamic();
         $inlineRef = new PaymentService();
         (function (&$value): void {})($$name);
         $inlineRef->afterInlineDynamicRef();

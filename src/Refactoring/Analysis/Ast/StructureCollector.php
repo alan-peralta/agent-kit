@@ -162,7 +162,7 @@ final class StructureCollector extends NodeVisitorAbstract
         }
 
         if ($node instanceof Node\Expr\CallLike) {
-            $this->invalidateCallArguments($node);
+            $this->taintCallArguments($node);
         }
 
         if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
@@ -525,22 +525,22 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->invalidateVariables(array_keys($this->localTypes));
     }
 
-    private function invalidateCallArguments(Node\Expr\CallLike $call): void
+    private function taintCallArguments(Node\Expr\CallLike $call): void
     {
         if ($call instanceof Node\Expr\FuncCall
             && ($call->name instanceof Node\Expr\Closure || $call->name instanceof Node\Expr\ArrowFunction)
-            && $this->invalidateVisibleCallableArguments($call->name->params, $call->getRawArgs())) {
+            && $this->taintVisibleCallableArguments($call->name->params, $call->getRawArgs())) {
             return;
         }
 
-        $this->invalidateDirectArguments($call->getRawArgs());
+        $this->taintDirectArguments($call->getRawArgs());
     }
 
     /**
      * @param list<Node\Param> $parameters
      * @param list<Node\Arg|Node\VariadicPlaceholder> $arguments
      */
-    private function invalidateVisibleCallableArguments(array $parameters, array $arguments): bool
+    private function taintVisibleCallableArguments(array $parameters, array $arguments): bool
     {
         $byName = [];
         $variadic = null;
@@ -575,7 +575,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 $index = $byName[$argument->name->toString()] ?? $variadic;
             } else {
                 if ($namedArgumentSeen || $positionAmbiguous) {
-                    $this->invalidateDirectArgument($argument);
+                    $this->taintDirectArgument($argument);
 
                     continue;
                 }
@@ -589,13 +589,13 @@ final class StructureCollector extends NodeVisitorAbstract
             }
 
             if ($index === null) {
-                $this->invalidateDirectArgument($argument);
+                $this->taintDirectArgument($argument);
 
                 continue;
             }
             $parameter = $parameters[$index];
             if ($parameter->byRef) {
-                $this->invalidateDirectArgument($argument);
+                $this->taintDirectArgument($argument);
             }
         }
 
@@ -603,16 +603,16 @@ final class StructureCollector extends NodeVisitorAbstract
     }
 
     /** @param list<Node\Arg|Node\VariadicPlaceholder> $arguments */
-    private function invalidateDirectArguments(array $arguments): void
+    private function taintDirectArguments(array $arguments): void
     {
         foreach ($arguments as $argument) {
             if ($argument instanceof Node\Arg) {
-                $this->invalidateDirectArgument($argument);
+                $this->taintDirectArgument($argument);
             }
         }
     }
 
-    private function invalidateDirectArgument(Node\Arg $argument): void
+    private function taintDirectArgument(Node\Arg $argument): void
     {
         if ($argument->unpack) {
             return;
@@ -621,11 +621,11 @@ final class StructureCollector extends NodeVisitorAbstract
             return;
         }
         if (!is_string($argument->value->name)) {
-            $this->invalidateAllLocalTypes();
+            $this->taintAllLocalTypes();
 
             return;
         }
-        $this->invalidateVariables([$argument->value->name]);
+        $this->taintVariables([$argument->value->name]);
     }
 
     private function taintAllLocalTypes(): void
