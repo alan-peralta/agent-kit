@@ -62,6 +62,9 @@ use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorCapabilitiesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorDependenciesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorImpactCommand;
+use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
+use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
+use Peralta\AgentKit\Refactoring\Mcp\RefactoringToolCatalog;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
 use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
@@ -79,6 +82,7 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->registerAgent();
         $this->registerAnalytics();
         $this->registerRefactoring();
+        $this->registerMcp();
     }
 
     public function boot(): void
@@ -317,5 +321,15 @@ class AgentKitServiceProvider extends ServiceProvider
         Event::listen(TokenUsageRecorded::class, LogUsageListener::class);
         Event::listen(ToolCallExecuted::class, LogToolCallListener::class);
         Event::listen(AgentKitEvent::class, PersistMetricsListener::class);
+    }
+
+    protected function registerMcp(): void
+    {
+        $this->app->singleton(RefactoringToolCatalog::class);
+        $this->app->singleton(McpLoggerFactory::class, fn ($app) => new McpLoggerFactory($app->make('log')));
+        $this->app->bind(McpServerFactory::class, fn ($app) => new McpServerFactory(
+            $app->make(RefactoringCapabilities::class),
+            $app->make(RefactoringToolCatalog::class),
+        ));
     }
 }
