@@ -76,7 +76,9 @@ final readonly class HttpServerOptions
 
     public function bindUri(): string
     {
-        $host = str_contains($this->host, ':') && !str_starts_with($this->host, '[') ? "[{$this->host}]" : $this->host;
+        // React\Socket\SocketServer binds IP literals only; `localhost` (accepted above as loopback) is a name, not one.
+        $host = $this->host === 'localhost' ? '127.0.0.1' : $this->host;
+        $host = str_contains($host, ':') && !str_starts_with($host, '[') ? "[{$host}]" : $host;
 
         return $host . ':' . $this->port;
     }

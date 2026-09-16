@@ -18,7 +18,6 @@ use React\Http\Middleware\RequestBodyBufferMiddleware;
 use React\Http\Middleware\StreamingRequestMiddleware;
 use React\Socket\ConnectionInterface;
 use React\Socket\SocketServer;
-use RuntimeException;
 use Throwable;
 
 final class ReactHttpListener
@@ -50,8 +49,15 @@ final class ReactHttpListener
 
         try {
             $socket = new SocketServer($options->bindUri(), [], $loop);
-        } catch (RuntimeException $exception) {
-            throw new McpConfigurationException('Could not bind the MCP HTTP transport to ' . $options->bindUri() . ': ' . $exception->getMessage());
+        } catch (Throwable $exception) {
+            // React\Socket\SocketServer/TcpServer throw RuntimeException for a busy port or
+            // permission problem, but InvalidArgumentException for a bind host that isn't an IP
+            // literal (e.g. an unmapped hostname) - both must become a clean refusal, never an
+            // uncaught crash.
+            throw new McpConfigurationException(
+                'Could not bind the MCP HTTP transport to ' . $options->bindUri() . ': ' . $exception->getMessage()
+                . '. Use an IP literal for --host/AGENT_KIT_MCP_HTTP_HOST.',
+            );
         }
 
         $this->closeIdleConnections($socket, $options->idleTimeout, $loop);

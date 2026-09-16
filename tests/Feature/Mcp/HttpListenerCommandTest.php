@@ -105,11 +105,33 @@ final class HttpListenerCommandTest extends TestCase
         self::assertStringContainsString('AGENT_KIT_MCP_HTTP_ENABLED', $run['stderr']);
     }
 
-    private function startListener(): int
+    public function test_localhost_binds_the_loopback_interface(): void
+    {
+        $port = $this->startListener('localhost');
+        $http = new HttpClient(['base_uri' => "http://127.0.0.1:{$port}", 'http_errors' => false]);
+
+        self::assertSame(401, $http->post('/mcp', ['body' => '{}'])->getStatusCode());
+    }
+
+    public function test_a_hostname_bind_is_refused_cleanly(): void
+    {
+        [$process, $pipes] = $this->spawn(
+            $this->serverArguments(['--transport=http', '--host=mcp.internal', '--allow-remote', '--port=' . $this->freePort()]),
+            $this->httpEnvironment(),
+        );
+        fclose($pipes[0]);
+        $run = $this->finish($process, $pipes);
+
+        self::assertSame(1, $run['status']);
+        self::assertSame('', $run['stdout']);
+        self::assertStringContainsString('Could not bind the MCP HTTP transport', $run['stderr']);
+    }
+
+    private function startListener(string $host = '127.0.0.1'): int
     {
         $port = $this->freePort();
         [$this->process, $this->pipes] = $this->spawn(
-            $this->serverArguments(['--transport=http', '--host=127.0.0.1', '--port=' . $port]),
+            $this->serverArguments(['--transport=http', '--host=' . $host, '--port=' . $port]),
             $this->httpEnvironment(),
         );
         fclose($this->pipes[0]);

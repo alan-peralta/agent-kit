@@ -96,6 +96,14 @@ final class HttpServerOptionsTest extends TestCase
         self::assertSame('[::1]:8787', HttpServerOptions::fromConfig($this->config(), host: '::1')->bindUri());
     }
 
+    public function test_localhost_binds_the_ipv4_loopback_address(): void
+    {
+        $options = HttpServerOptions::fromConfig($this->config(), host: 'localhost');
+
+        self::assertSame('127.0.0.1:8787', $options->bindUri());
+        self::assertContains('localhost', $options->allowedHosts);
+    }
+
     private function config(array $overrides = []): array
     {
         return array_merge([
