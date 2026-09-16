@@ -1,0 +1,243 @@
+<?php
+
+namespace Peralta\AgentKit\Tests\Unit\Refactoring;
+
+use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParsedFile;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
+use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyType;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
+use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
+use PHPUnit\Framework\TestCase;
+
+final class CodebaseIndexerTest extends TestCase
+{
+    public function test_its_normalization_seam_preserves_a_filesystem_root_without_building(): void
+    {
+        $scanner = new ProjectScanner(new PhpFileAnalyzer());
+        $indexer = new CodebaseIndexer($scanner, new PhpAstParser());
+        $method = new \ReflectionMethod($indexer, 'normalizedRoot');
+
+        $this->assertSame(realpath(DIRECTORY_SEPARATOR), $method->invoke($indexer, DIRECTORY_SEPARATOR));
+    }
+
+    public function test_it_parses_every_discovered_file_once(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/A.php', '<?php class A {}');
+        file_put_contents($root . '/B.php', '<?php class B {}');
+
+        $parser = new class implements AstParser {
+            public array $calls = [];
+
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                $this->calls[] = $file;
+                $name = pathinfo($file, PATHINFO_FILENAME);
+
+                return new ParsedFile($displayPath ?? $file, [
+                    new SymbolDefinition("Fixtures\\{$name}", 'class', $displayPath ?? $file, 1),
+                ]);
+            }
+        };
+
+        $scanner = new ProjectScanner(new PhpFileAnalyzer());
+        $index = (new CodebaseIndexer($scanner, $parser))->build($root);
+
+        $this->assertCount(2, $parser->calls);
+        $this->assertCount(2, array_unique($parser->calls));
+        $this->assertNotNull($index->findClass('Fixtures\\A'));
+        $this->assertNotNull($index->findClass('\\Fixtures\\B'));
+
+        unlink($root . '/A.php');
+        unlink($root . '/B.php');
+        rmdir($root);
+    }
+
+    public function test_it_indexes_real_declarations_and_reverse_references(): void
+    {
+        $root = dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast';
+        $scanner = new ProjectScanner(new PhpFileAnalyzer());
+        $index = (new CodebaseIndexer($scanner, new PhpAstParser()))->build($root);
+
+        $this->assertSame('class', $index->findClass('Fixtures\\Payments\\PaymentService')->kind);
+        $this->assertSame('interface', $index->findClass('Fixtures\\Payments\\PaymentGateway')->kind);
+        $this->assertSame('trait', $index->findClass('Fixtures\\Payments\\LogsPayments')->kind);
+        $this->assertSame('enum', $index->findClass('Fixtures\\Payments\\PaymentStatus')->kind);
+        $this->assertSame('charge', $index->findMethod('Fixtures\\Payments\\PaymentService', 'charge')['name']);
+        $this->assertContains(
+            'Fixtures\\Payments\\PaymentService',
+            array_map(fn ($symbol) => $symbol->fqcn, $index->classesInFile('PaymentService.php')),
+        );
+        $this->assertNotEmpty($index->findReferencesTo('Fixtures\\Payments\\PaymentService'));
+        $this->assertNotEmpty($index->findDependencies('Fixtures\\Checkout\\CheckoutService'));
+        $this->assertNotEmpty($index->findMethodCalls('Fixtures\\Payments\\PaymentService', 'charge'));
+        $this->assertSame(
+            [DependencyType::METHOD_CALL->value],
+            array_values(array_unique(array_map(fn ($edge) => $edge->type->value, $index->findMethodCalls('Fixtures\\Payments\\PaymentService', 'charge')))),
+        );
+        $this->assertNotEmpty($index->unresolvedReferences());
+        $this->assertContains('unknown', array_column($index->unresolvedReferences(), 'confidence'));
+        $this->assertContains(null, array_column($index->unresolvedReferences(), 'target'), true);
+    }
+
+    public function test_class_and_method_lookups_are_case_insensitive_but_preserve_declared_spelling(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-case-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Service.php', <<<'PHP'
+<?php
+namespace Demo;
+final class PaymentService { public function charge(): void {} }
+final class Caller { public function run(PaymentService $service): void { $service->Charge(); } }
+PHP);
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertSame('Demo\\PaymentService', $index->findClass('demo\\paymentservice')?->fqcn);
+            $this->assertSame('charge', $index->findMethod('DEMO\\PAYMENTSERVICE', 'CHARGE')['name']);
+            $calls = $index->findMethodCalls('demo\\paymentservice', 'charge');
+            $this->assertCount(1, $calls);
+            $this->assertSame('Demo\\Caller', $calls[0]->source);
+            $this->assertSame('Demo\\PaymentService', $calls[0]->target);
+            $this->assertSame('charge', $calls[0]->targetMethod);
+        } finally {
+            unlink($root . '/Service.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_it_retains_case_insensitive_duplicate_declarations_as_ambiguous(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-duplicate-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service { function run(): void {} }');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service { function execute(): void {} }');
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertTrue($index->isClassAmbiguous('DEMO\\SERVICE'));
+            $this->assertSame(
+                ['First.php', 'Second.php'],
+                array_column($index->classDeclarations('demo\\service'), 'file'),
+            );
+            $this->assertSame('First.php', $index->findClass('Demo\\Service')?->file);
+            $this->assertNull($index->findMethod('Demo\\Service', 'run'));
+            $this->assertNull($index->graph()->node('Demo\\Service'));
+        } finally {
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_it_indexes_dynamic_container_resolution_as_an_unresolved_reference(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-dynamic-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Dynamic.php', <<<'PHP'
+<?php
+namespace Demo;
+class Dynamic { function run(string $className): void { app($className); } }
+PHP);
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertSame([[
+                'source' => 'Demo\\Dynamic',
+                'source_method' => 'run',
+                'target' => null,
+                'target_method' => null,
+                'type' => 'instantiation',
+                'confidence' => 'unknown',
+                'file' => 'Dynamic.php',
+                'line' => 3,
+                'metadata' => ['resolution' => 'app'],
+            ]], $index->unresolvedReferences());
+        } finally {
+            unlink($root . '/Dynamic.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_edges_omitted_for_ambiguous_declarations_are_retained_as_unresolved_evidence(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-ambiguous-edge-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Consumer.php', '<?php namespace Demo; class Consumer { function run(Service $service): void { $service->go(); } }');
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service { function go(): void {} }');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service { function go(): void {} }');
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $this->assertSame([], $index->findReferencesTo('Demo\\Service'));
+            $ambiguous = array_values(array_filter(
+                $index->unresolvedReferences(),
+                fn (array $reference) => ($reference['metadata']['reason'] ?? null) === 'ambiguous_target',
+            ));
+            $this->assertCount(2, $ambiguous);
+            $this->assertSame(
+                ['method_parameter', 'method_call'],
+                array_column($ambiguous, 'type'),
+            );
+            foreach ($ambiguous as $reference) {
+                $this->assertNull($reference['target']);
+                $this->assertSame('unknown', $reference['confidence']);
+                $this->assertSame('Demo\\Service', $reference['metadata']['original_target']);
+                $this->assertArrayHasKey('original_metadata', $reference['metadata']);
+            }
+        } finally {
+            unlink($root . '/Consumer.php');
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+
+    public function test_duplicate_declarations_without_edges_emit_deterministic_diagnostics(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-ambiguous-diagnostic-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/First.php', '<?php namespace Demo; class Service {}');
+        file_put_contents($root . '/Second.php', '<?php namespace demo; class service {}');
+
+        try {
+            $index = (new CodebaseIndexer(
+                new ProjectScanner(new PhpFileAnalyzer()),
+                new PhpAstParser(),
+            ))->build($root);
+
+            $diagnostics = array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics());
+            $this->assertSame(['First.php', 'Second.php'], array_column($diagnostics, 'file'));
+            $this->assertSame([1, 1], array_column($diagnostics, 'line'));
+            foreach ($diagnostics as $diagnostic) {
+                $this->assertStringContainsString('Ambiguous class declaration', $diagnostic['message']);
+                $this->assertStringContainsString('Demo\\Service', $diagnostic['message']);
+                $this->assertStringContainsString('First.php, Second.php', $diagnostic['message']);
+            }
+        } finally {
+            unlink($root . '/First.php');
+            unlink($root . '/Second.php');
+            rmdir($root);
+        }
+    }
+}

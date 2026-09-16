@@ -39,6 +39,29 @@ use Peralta\AgentKit\Providers\AnthropicProvider;
 use Peralta\AgentKit\Providers\DeepSeekProvider;
 use Peralta\AgentKit\Providers\GeminiProvider;
 use Peralta\AgentKit\Providers\OpenAIProvider;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
+use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
+use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
+use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
+use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
+use Peralta\AgentKit\Refactoring\Agents\AgentTemplateRenderer;
+use Peralta\AgentKit\Refactoring\Agents\ClaudeCodeAgentAdapter;
+use Peralta\AgentKit\Refactoring\Agents\CursorAgentAdapter;
+use Peralta\AgentKit\Refactoring\Application\DefaultRefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
+use Peralta\AgentKit\Refactoring\Commands\InstallAgentsCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorAnalyzeCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorAuditCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorCapabilitiesCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorDependenciesCommand;
+use Peralta\AgentKit\Refactoring\Commands\RefactorImpactCommand;
+use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
+use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
+use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
 
 class AgentKitServiceProvider extends ServiceProvider
 {
@@ -52,6 +75,7 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->registerErrorRecovery();
         $this->registerAgent();
         $this->registerAnalytics();
+        $this->registerRefactoring();
     }
 
     public function boot(): void
@@ -64,6 +88,16 @@ class AgentKitServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'agent-kit-migrations');
+
+            $this->commands([
+                InstallAgentsCommand::class,
+                RefactorAuditCommand::class,
+                RefactorAnalyzeCommand::class,
+                RefactorCapabilitiesCommand::class,
+                RefactorCallersCommand::class,
+                RefactorDependenciesCommand::class,
+                RefactorImpactCommand::class,
+            ]);
         }
     }
 
@@ -215,6 +249,54 @@ class AgentKitServiceProvider extends ServiceProvider
                 pipeline: $app->make(Pipeline::class),
             );
         });
+    }
+
+    protected function registerRefactoring(): void
+    {
+        $this->app->bind(PhpFileAnalyzer::class, fn () => new PhpFileAnalyzer(
+            config('agent-kit.refactoring.thresholds', []),
+        ));
+
+        $this->app->bind(ProjectScanner::class, fn ($app) => new ProjectScanner(
+            analyzer: $app->make(PhpFileAnalyzer::class),
+            excludedDirectories: config('agent-kit.refactoring.exclude', []),
+        ));
+
+        $this->app->singleton(RefactoringReport::class);
+
+        $this->app->bind(AstParser::class, fn () => new PhpAstParser(
+            config('agent-kit.refactoring.facades', ['Illuminate\\Support\\Facades\\']),
+        ));
+        $this->app->bind(CodebaseIndexer::class, fn ($app) => new CodebaseIndexer(
+            $app->make(ProjectScanner::class),
+            $app->make(AstParser::class),
+        ));
+        $this->app->singleton(CallerAnalyzer::class);
+        $this->app->bind(ImpactAnalyzer::class, fn () => new ImpactAnalyzer(
+            config('agent-kit.refactoring.impact_thresholds', []),
+        ));
+        $this->app->bind(RefactoringCapabilities::class, fn ($app) => new DefaultRefactoringCapabilities(
+            $app->make(ProjectScanner::class),
+            $app->make(PhpFileAnalyzer::class),
+            $app->make(RefactoringReport::class),
+            $app->make(CodebaseIndexer::class),
+            $app->make(CallerAnalyzer::class),
+            $app->make(ImpactAnalyzer::class),
+        ));
+
+        $this->app->singleton(AgentCommandRepository::class, fn () => new AgentCommandRepository(
+            __DIR__ . '/../resources/agents/refactoring',
+        ));
+        $this->app->singleton(AgentTemplateRenderer::class);
+        $this->app->singleton(AgentAdapterRegistry::class, fn () => new AgentAdapterRegistry([
+            new CursorAgentAdapter(),
+            new ClaudeCodeAgentAdapter(),
+        ]));
+        $this->app->singleton(AgentConfigurationInstaller::class, fn ($app) => new AgentConfigurationInstaller(
+            $app->make(AgentAdapterRegistry::class),
+            $app->make(AgentCommandRepository::class),
+            $app->make(AgentTemplateRenderer::class),
+        ));
     }
 
     protected function registerAnalytics(): void

@@ -192,6 +192,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Refactoring Agent
+    |--------------------------------------------------------------------------
+    | Deterministic signals used by the refactoring audit. They are candidates
+    | for review, not automatic architectural verdicts.
+    */
+    'refactoring' => [
+        'exclude' => [
+            'vendor',
+            'storage',
+            'bootstrap/cache',
+            'node_modules',
+            '.git',
+        ],
+        'thresholds' => [
+            'large_class_lines' => 500,
+            'many_methods' => 20,
+            'many_dependencies' => 12,
+            'high_branching' => 25,
+        ],
+        'impact_thresholds' => [
+            'low_max' => 2,
+            'medium_max' => 7,
+            'high_max' => 15,
+        ],
+        'facades' => [
+            'Illuminate\\Support\\Facades\\',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Error Recovery
     |--------------------------------------------------------------------------
     | Retry automático, fallback entre providers e alertas via Discord.

@@ -258,3 +258,76 @@ Eventos disparados:
 - `ToolCallExecuted` — disparado após cada execução de tool
 - `RecoveryAttempted` — disparado a cada tentativa de retry/fallback
 - `RecoveryExhausted` — disparado quando todas as tentativas de recuperação se esgotam
+
+## Refactoring Agent
+
+O Agent Kit inclui um auditor inicial de refatoração para PHP/Laravel. Ele coleta sinais determinísticos do codebase para que agentes de coding possam raciocinar com dados objetivos antes de propor mudanças.
+
+```bash
+php artisan agent-kit:refactor-audit
+php artisan agent-kit:refactor-audit /path/to/project
+php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
+php artisan agent-kit:refactor-callers "App\Services\PaymentService::charge"
+php artisan agent-kit:refactor-dependencies "App\Services\PaymentService"
+php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json --path=/project
+```
+
+Em `agent-kit:refactor-audit`, a raiz opcional é um argumento posicional, como
+em `php artisan agent-kit:refactor-audit /path/to/project`. Analyze, callers,
+dependencies e impact usam `--path=/project` para outra raiz. Use `--json` para
+obter saída estruturada adequada a agentes e automações. Todos os comandos são
+somente de análise: nenhum deles modifica o código examinado.
+
+Os relatórios de auditoria são gravados em `.agent-kit/refactoring/`. Veja
+[REFACTORING_AGENT.md](REFACTORING_AGENT.md) para arquitetura, tipos de
+dependência, níveis de confiança, workflow e limitações.
+
+## Using Refactoring Agent with Coding Agents
+
+Instale as skills nativas no projeto que será analisado:
+
+```bash
+php artisan agent-kit:agents:install cursor --path=/project
+php artisan agent-kit:agents:install claude --path=/project
+php artisan agent-kit:agents:install --all --path=/project
+```
+
+`--path=/project` precisa apontar para um diretório existente; um valor vazio é
+rejeitado. Use agentes posicionais (`cursor`, `claude`) ou `--all`, nunca ambos.
+Arquivos personalizados em conflito são preservados, exceto quando `--force` é
+fornecido explicitamente.
+
+Cursor e Claude Code recebem os mesmos seis comandos portáveis:
+
+```text
+/refactor-audit
+/refactor-analyze <target>
+/refactor-callers <target>
+/refactor-dependencies <target>
+/refactor-impact <target>
+/refactor-plan <target>
+```
+
+Exemplo: `/refactor-impact App\Services\PaymentService::charge`.
+
+As skills tentam obter fatos na ordem: MCP compatível, CLI
+`agent-kit:refactor-* --json`, leitura/pesquisa no repositório e, por último,
+interpretação do LLM. Elas separam `FACTS`, `INTERPRETATION` e
+`RECOMMENDATIONS`, sinalizam comportamento dinâmico não resolvido e mantêm
+`ANALYZE != MODIFY`. O MCP ainda não está disponível; é uma integração futura.
+Hoje, a CLI direta — por exemplo,
+`php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json`
+— é o fallback determinístico.
+
+O Refactoring Core é compartilhado pela CLI, pelos coding agents e pelo futuro
+servidor MCP. No `/refactor-plan`, a saída é somente um plano. No `/refactor-audit`
+e nos demais comandos, a saída é somente análise. No command applies changes
+automatically. No `/refactor-apply` command is generated.
+
+```text
+               Refactoring Core
+                     |
+      +--------------+--------------+
+      v              v              v
+     CLI        Coding Agents       MCP
+```

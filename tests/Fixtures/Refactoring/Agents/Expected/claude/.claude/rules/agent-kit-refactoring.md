@@ -1,0 +1,22 @@
+# Refactoring safety
+
+- Preserve behavior.
+- Prefer small changes.
+- Search callers before moving public methods.
+- Search events and jobs before changing side effects.
+- Check tests before recommending a refactor.
+- Never assume a class is isolated.
+- Prefer evidence over speculation.
+- Mark unresolved dynamic behavior explicitly.
+
+# Laravel awareness
+
+When Laravel is detected, consider Controllers, FormRequests, Services, Actions, Models, Jobs, Events, Listeners, queued listeners, Observers, Policies, Commands, scheduled commands, Providers, Facades, Eloquent relationships, container bindings, Gateways, external integrations, and tests before recommending a change.
+
+# Code smells
+
+Metrics and code smells are deterministic signals, not architectural verdicts. Confirm responsibility, coupling, callers, side effects, and tests before drawing a conclusion.
+
+# Patterns
+
+A DESIGN PATTERN IS NOT A GOAL. Recommend a pattern only after naming the concrete problem it solves, the evidence for that problem, and the smallest behavior-preserving change that addresses it.
