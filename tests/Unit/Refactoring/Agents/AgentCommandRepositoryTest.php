@@ -76,6 +76,27 @@ final class AgentCommandRepositoryTest extends TestCase
         self::assertStringContainsString('A DESIGN PATTERN IS NOT A GOAL.', $expected);
     }
 
+    public function test_every_command_names_its_read_only_mcp_tool_and_never_an_apply_tool(): void
+    {
+        $repository = new AgentCommandRepository(dirname(__DIR__, 4) . '/resources/agents/refactoring');
+        $tools = [
+            'audit' => 'refactoring_audit',
+            'analyze' => 'refactoring_analyze',
+            'callers' => 'refactoring_callers',
+            'dependencies' => 'refactoring_dependencies',
+            'impact' => 'refactoring_impact',
+            'plan' => 'refactoring_impact',
+        ];
+
+        foreach ($tools as $name => $tool) {
+            $content = $repository->command($name);
+            self::assertStringContainsString("`{$tool}`", $content, $name);
+            self::assertStringContainsString('refactoring_capabilities', $content, $name);
+            self::assertStringNotContainsString('refactoring_apply', $content, $name);
+            self::assertStringNotContainsString('does not exist yet', $content, $name);
+        }
+    }
+
     public function test_it_rejects_unknown_command_names_before_resolving_a_path(): void
     {
         $repository = new AgentCommandRepository($this->resources);
