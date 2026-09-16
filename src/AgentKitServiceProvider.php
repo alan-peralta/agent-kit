@@ -62,9 +62,11 @@ use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorCapabilitiesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorDependenciesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorImpactCommand;
+use Peralta\AgentKit\Refactoring\Mcp\Commands\McpServeCommand;
 use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\RefactoringToolCatalog;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\StdioServerRunner;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
 use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
@@ -104,6 +106,7 @@ class AgentKitServiceProvider extends ServiceProvider
                 RefactorCallersCommand::class,
                 RefactorDependenciesCommand::class,
                 RefactorImpactCommand::class,
+                McpServeCommand::class,
             ]);
         }
     }
@@ -330,6 +333,10 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->app->bind(McpServerFactory::class, fn ($app) => new McpServerFactory(
             $app->make(RefactoringCapabilities::class),
             $app->make(RefactoringToolCatalog::class),
+        ));
+        $this->app->bind(StdioServerRunner::class, fn ($app) => new StdioServerRunner(
+            $app->make(McpServerFactory::class),
+            $app->make(CachedCodebaseIndexer::class),
         ));
     }
 }
