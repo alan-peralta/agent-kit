@@ -137,6 +137,13 @@ trait SpawnsMcpServer
             $arguments,
         ));
 
+        // shell_exec() runs this through `sh -c`, whose own argv contains the pattern verbatim, so on a
+        // package path without regex metacharacters the pattern would also match that wrapper and the
+        // "no orphan process" assertion would fail spuriously. Splitting the first character into a
+        // bracket expression still matches the server's real `agent-kit:mcp ...` argv, while the
+        // wrapper's literal `[a]gent-kit:mcp` can never match it.
+        $pattern = preg_replace('/agent-kit:mcp/', '[a]gent-kit:mcp', $pattern, 1);
+
         return trim((string) shell_exec('pgrep -f ' . escapeshellarg($pattern) . ' || true'));
     }
 
