@@ -11,13 +11,17 @@ final readonly class HttpServerOptions
     private const LOOPBACK_HOSTS = ['127.0.0.1', '::1', '[::1]', 'localhost'];
     private const DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
-    /** @param list<string> $allowedHosts */
+    /**
+     * @param  list<string>  $allowedHosts  hosts the DNS-rebinding allowlist accepts
+     * @param  list<string>  $allowedOrigins  full origins CORS answers with, empty = no Access-Control-Allow-Origin
+     */
     private function __construct(
         public string $host,
         public int $port,
         public string $path,
         public bool $allowRemote,
         public array $allowedHosts,
+        public array $allowedOrigins,
         public string $bearerToken,
         public int $maxBodyBytes,
         public int $idleTimeout,
@@ -62,9 +66,12 @@ final readonly class HttpServerOptions
         return new self(
             host: $host,
             port: $port,
-            path: '/' . ltrim((string) ($config['path'] ?? '/mcp'), '/'),
+            // trim() on both ends, so '/mcp/', 'mcp' and '/mcp' all normalise to '/mcp' and the
+            // bare root '/' stays '/' - the endpoint comparison in HttpTransportFactory is exact.
+            path: '/' . trim((string) ($config['path'] ?? '/mcp'), '/'),
             allowRemote: $allowRemote,
             allowedHosts: $allowedHosts,
+            allowedOrigins: self::parseOrigins((string) ($config['allowed_origins'] ?? '')),
             bearerToken: $token,
             maxBodyBytes: self::positive($config, 'max_body_bytes', 'AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES'),
             idleTimeout: self::positive($config, 'idle_timeout', 'AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT'),
@@ -95,6 +102,33 @@ final readonly class HttpServerOptions
         }
 
         return array_values(array_unique($hosts));
+    }
+
+    /**
+     * The configured entries that are full origins (they carry a scheme), lower-cased and reduced
+     * to `scheme://host[:port]`. Bare hosts are deliberately skipped: they extend the host
+     * allowlist only, and CORS must name an exact origin or stay silent (spec 10.2).
+     *
+     * @return list<string>
+     */
+    public static function parseOrigins(string $origins): array
+    {
+        $parsed = [];
+        foreach (explode(',', $origins) as $origin) {
+            $origin = strtolower(trim($origin));
+            if ($origin === '' || !str_contains($origin, '://')) {
+                continue;
+            }
+
+            $parts = parse_url($origin);
+            if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+                continue;
+            }
+
+            $parsed[] = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        }
+
+        return array_values(array_unique($parsed));
     }
 
     private static function hostOf(string $value): string

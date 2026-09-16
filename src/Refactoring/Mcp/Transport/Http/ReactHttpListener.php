@@ -22,6 +22,17 @@ use Throwable;
 
 final class ReactHttpListener
 {
+    /** Bind hosts that accept connections on every interface, as HttpServerOptions normalises them. */
+    private const WILDCARD_HOSTS = ['0.0.0.0', '[::]'];
+
+    /**
+     * Listener-wide "something was served at" timestamp, bumped whenever a request handler
+     * returns. Tool execution blocks the single-threaded loop, so a call that runs longer
+     * than the idle timeout has no `data` event to prove the connection is alive; without
+     * this the idle timer expires mid-call and the response it produced is thrown away.
+     */
+    private float $lastActivity = 0.0;
+
     public function __construct(
         private readonly McpServerFactory $factory,
         private readonly CachedCodebaseIndexer $indexCache,
@@ -37,6 +48,7 @@ final class ReactHttpListener
         $server = $this->factory->create($root, $logger, $sessions);
         $transport = HttpTransportFactory::fromOptions($options);
         $loop = Loop::get();
+        $this->lastActivity = microtime(true);
 
         $http = new HttpServer(
             $loop,
@@ -44,7 +56,13 @@ final class ReactHttpListener
             new LimitConcurrentRequestsMiddleware($options->maxConcurrentRequests),
             $this->rejectOversizedBodies($options->maxBodyBytes),
             new RequestBodyBufferMiddleware($options->maxBodyBytes),
-            static fn (ServerRequestInterface $request): ResponseInterface => $transport->handle($server, $request, $logger),
+            function (ServerRequestInterface $request) use ($transport, $server, $logger): ResponseInterface {
+                try {
+                    return $transport->handle($server, $request, $logger);
+                } finally {
+                    $this->lastActivity = microtime(true);
+                }
+            },
         );
 
         try {
@@ -64,11 +82,9 @@ final class ReactHttpListener
         $http->on('error', static fn (Throwable $error) => $logger->error('MCP HTTP server error.', ['exception' => $error]));
         $http->listen($socket);
 
-        $stop = function (int $signal) use ($loop, $socket, $sessions, $logger): void {
+        $stop = static function (int $signal) use ($loop, $socket, $logger): void {
             $logger->info('Stopping MCP HTTP server.', ['signal' => $signal]);
             $socket->close();
-            $sessions->clear();
-            $this->indexCache->clear();
             $loop->stop();
         };
         if (function_exists('pcntl_signal')) {
@@ -76,12 +92,24 @@ final class ReactHttpListener
             $loop->addSignal(SIGTERM, $stop);
         }
 
+        if ($options->allowRemote && in_array($options->host, self::WILDCARD_HOSTS, true)) {
+            $logger->warning('Bound to a wildcard address; clients must use a hostname or IP listed in AGENT_KIT_MCP_ALLOWED_ORIGINS or requests are answered 403.');
+        }
+
         $logger->info('MCP HTTP server listening.', [
             'endpoint' => 'http://' . $options->bindUri() . $options->path,
             'project_root' => $root->path,
             'allowed_hosts' => $options->allowedHosts,
         ]);
-        $loop->run();
+
+        try {
+            $loop->run();
+        } finally {
+            // Every exit path - a signal, a stopped loop or an exception escaping the loop -
+            // must release the sessions and the in-memory AST index, not just the signal one.
+            $sessions->clear();
+            $this->indexCache->clear();
+        }
 
         return 0;
     }
@@ -113,22 +141,34 @@ final class ReactHttpListener
         };
     }
 
+    /**
+     * A periodic check per connection, not a one-shot timer re-armed on `data`: a one-shot timer
+     * armed before a slow tool call expires *while* the handler blocks the loop, ReactPHP drains
+     * expired timers before the write phase, and `Connection::close()` then discards the response
+     * that handler had already buffered. Comparing against a timestamp instead means an expired
+     * deadline is re-evaluated rather than acted on blindly.
+     *
+     * Activity is the newest of this connection's last `data` event and the listener-wide
+     * $lastActivity. The latter is not per-connection on purpose: mapping a response back to its
+     * connection would mean matching REMOTE_ADDR/REMOTE_PORT from the request's server params,
+     * and the only cost of the coarser signal is that a busy listener keeps *other* idle
+     * connections open a little longer - never that a live request is cut off.
+     */
     private function closeIdleConnections(SocketServer $socket, int $idleTimeout, LoopInterface $loop): void
     {
-        $socket->on('connection', static function (ConnectionInterface $connection) use ($idleTimeout, $loop): void {
-            $timer = null;
-            $arm = static function () use (&$timer, $connection, $idleTimeout, $loop): void {
-                if ($timer !== null) {
-                    $loop->cancelTimer($timer);
+        $socket->on('connection', function (ConnectionInterface $connection) use ($idleTimeout, $loop): void {
+            $lastData = microtime(true);
+            $connection->on('data', static function () use (&$lastData): void {
+                $lastData = microtime(true);
+            });
+
+            $timer = $loop->addPeriodicTimer(min($idleTimeout, 1.0), function () use (&$lastData, $connection, $idleTimeout): void {
+                if (microtime(true) - max($lastData, $this->lastActivity) >= $idleTimeout) {
+                    $connection->close();
                 }
-                $timer = $loop->addTimer($idleTimeout, static fn () => $connection->close());
-            };
-            $arm();
-            $connection->on('data', $arm);
-            $connection->on('close', static function () use (&$timer, $loop): void {
-                if ($timer !== null) {
-                    $loop->cancelTimer($timer);
-                }
+            });
+            $connection->on('close', static function () use ($timer, $loop): void {
+                $loop->cancelTimer($timer);
             });
         });
     }

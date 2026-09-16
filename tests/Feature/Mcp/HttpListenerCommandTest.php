@@ -18,6 +18,7 @@ final class HttpListenerCommandTest extends TestCase
     /** @var resource|null */
     private $process = null;
     private array $pipes = [];
+    private ?string $generatedProject = null;
 
     protected function tearDown(): void
     {
@@ -25,6 +26,7 @@ final class HttpListenerCommandTest extends TestCase
             proc_terminate($this->process, 15);
             $this->finish($this->process, $this->pipes, 10);
         }
+        $this->removeGeneratedProject();
         parent::tearDown();
     }
 
@@ -79,6 +81,39 @@ final class HttpListenerCommandTest extends TestCase
         fclose($socket);
     }
 
+    public function test_a_slow_call_is_not_dropped_by_the_idle_timeout(): void
+    {
+        $port = $this->startListener('127.0.0.1', $this->generateLargeProject());
+        $client = Client::builder()->setClientInfo('agent-kit-tests', '1.0.0')->setInitTimeout(20)->setRequestTimeout(60)->setMaxRetries(0)->build();
+        // `Connection: close` is not decoration: curl transparently replays a request when the
+        // *reused* connection dies before any byte of the response arrives, and that replay hits
+        // a warm index cache and returns in milliseconds - which would hide a dropped response
+        // behind a doubled analysis. One request per connection makes the drop observable, the
+        // way any MCP client that does not pool connections would experience it.
+        $http = new HttpClient(['headers' => ['Connection' => 'close']]);
+        $client->connect(new HttpTransport("http://127.0.0.1:{$port}/mcp", ['Authorization' => 'Bearer ' . self::TOKEN], $http));
+
+        try {
+            // AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT is 1s here: the analysis blocks the event loop for
+            // longer than that, so the per-connection idle timer expires while the response is
+            // being produced. It must not close the connection and discard that response.
+            $started = microtime(true);
+            $result = $client->callTool('refactoring_analyze', ['target' => 'SlowProject\\Generated\\Klass0']);
+            $elapsed = microtime(true) - $started;
+
+            self::assertFalse($result->isError, json_encode($result->structuredContent));
+            self::assertSame('analyze', $result->structuredContent['capability']);
+            if ($elapsed < 1.5) {
+                self::markTestSkipped(sprintf(
+                    'This machine analyzed the generated project in %.2fs, too close to the 1s idle timeout for this test to prove anything.',
+                    $elapsed,
+                ));
+            }
+        } finally {
+            $client->disconnect();
+        }
+    }
+
     public function test_remote_binds_are_refused_without_opt_in(): void
     {
         [$process, $pipes] = $this->spawn($this->serverArguments(['--transport=http', '--host=0.0.0.0', '--port=' . $this->freePort()]), $this->httpEnvironment());
@@ -105,6 +140,17 @@ final class HttpListenerCommandTest extends TestCase
         self::assertStringContainsString('AGENT_KIT_MCP_HTTP_ENABLED', $run['stderr']);
     }
 
+    public function test_a_non_numeric_port_is_refused(): void
+    {
+        [$process, $pipes] = $this->spawn($this->serverArguments(['--transport=http', '--port=80o80']), $this->httpEnvironment());
+        fclose($pipes[0]);
+        $run = $this->finish($process, $pipes);
+
+        self::assertSame(1, $run['status']);
+        self::assertSame('', $run['stdout']);
+        self::assertStringContainsString('--port option must be an integer', $run['stderr']);
+    }
+
     public function test_localhost_binds_the_loopback_interface(): void
     {
         $port = $this->startListener('localhost');
@@ -127,11 +173,11 @@ final class HttpListenerCommandTest extends TestCase
         self::assertStringContainsString('Could not bind the MCP HTTP transport', $run['stderr']);
     }
 
-    private function startListener(string $host = '127.0.0.1'): int
+    private function startListener(string $host = '127.0.0.1', ?string $path = null): int
     {
         $port = $this->freePort();
         [$this->process, $this->pipes] = $this->spawn(
-            $this->serverArguments(['--transport=http', '--host=' . $host, '--port=' . $port]),
+            $this->serverArguments(['--transport=http', '--host=' . $host, '--port=' . $port], $path),
             $this->httpEnvironment(),
         );
         fclose($this->pipes[0]);
@@ -163,6 +209,55 @@ final class HttpListenerCommandTest extends TestCase
             'AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT' => '1',
             'AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES' => '1024',
         ], $overrides);
+    }
+
+    /**
+     * A throw-away project big enough that indexing it takes clearly longer than the 1s idle
+     * timeout, so a tool call really does outlive the timer instead of only nearly doing so.
+     */
+    private function generateLargeProject(): string
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-mcp-slow-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($root, 0777, true), "Could not create {$root}.");
+        $this->generatedProject = $root;
+
+        $written = 0;
+        for ($file = 0; $file < 400; $file++) {
+            $source = "<?php\n\nnamespace SlowProject\\Generated;\n\n";
+            for ($class = 0; $class < 3; $class++) {
+                $name = $class === 0 ? "Klass{$file}" : "Klass{$file}_{$class}";
+                $collaborator = $class === 2 ? "Klass{$file}" : 'Klass' . $file . '_' . ($class + 1);
+                $source .= "class {$name}\n{\n";
+                for ($method = 0; $method < 8; $method++) {
+                    $next = ($method + 1) % 8;
+                    $source .= "    public function method{$method}(int \$value): int\n    {\n";
+                    $source .= "        \$collaborator = new {$collaborator}();\n";
+                    $source .= "        \$total = \$collaborator->method{$next}(\$value);\n";
+                    for ($line = 0; $line < 5; $line++) {
+                        $source .= "        \$total += \$value * {$line};\n";
+                    }
+                    $source .= "        return \$total;\n    }\n\n";
+                }
+                $source .= "}\n\n";
+            }
+            $written += file_put_contents($root . "/File{$file}.php", $source) === false ? 0 : 1;
+        }
+        self::assertSame(400, $written, "Could not write the generated project in {$root}.");
+
+        return $root;
+    }
+
+    private function removeGeneratedProject(): void
+    {
+        if ($this->generatedProject === null) {
+            return;
+        }
+
+        foreach (glob($this->generatedProject . '/*.php') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($this->generatedProject);
+        $this->generatedProject = null;
     }
 
     private function freePort(): int

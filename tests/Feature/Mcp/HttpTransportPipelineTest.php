@@ -47,6 +47,23 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertSame(204, $this->send('OPTIONS', ['Origin' => 'http://localhost:6274'])->getStatusCode());
     }
 
+    public function test_cors_answers_only_the_configured_origins(): void
+    {
+        $configured = HttpTransportFactory::fromOptions($this->httpOptions(['allowed_origins' => 'http://localhost:6274']));
+        $preflight = $configured->handle(
+            $this->server,
+            new ServerRequest('OPTIONS', self::ENDPOINT, ['Origin' => 'http://localhost:6274', 'Accept' => 'application/json, text/event-stream']),
+            new NullLogger(),
+        );
+
+        self::assertSame(204, $preflight->getStatusCode());
+        self::assertSame('http://localhost:6274', $preflight->getHeaderLine('Access-Control-Allow-Origin'));
+
+        $unconfigured = $this->send('OPTIONS', ['Origin' => 'http://localhost:6274']);
+        self::assertSame(204, $unconfigured->getStatusCode());
+        self::assertFalse($unconfigured->hasHeader('Access-Control-Allow-Origin'));
+    }
+
     public function test_requests_without_a_bearer_token_are_401_before_any_mcp_processing(): void
     {
         $response = $this->send('POST', [], $this->initialize());

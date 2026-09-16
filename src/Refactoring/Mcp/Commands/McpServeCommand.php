@@ -56,11 +56,16 @@ final class McpServeCommand extends Command
     private function httpOptions(array $config): HttpServerOptions
     {
         $port = $this->option('port');
+        // A typo such as --port=80o80 used to cast to 80 (or be dropped entirely) and the server
+        // would quietly listen somewhere the user never asked for; refuse it instead.
+        if ($port !== null && !ctype_digit((string) $port)) {
+            throw new McpConfigurationException("The --port option must be an integer between 1 and 65535, got {$port}.");
+        }
 
         return HttpServerOptions::fromConfig(
             $config,
             host: $this->option('host') ?: null,
-            port: is_numeric($port) ? (int) $port : null,
+            port: $port === null ? null : (int) $port,
             allowRemote: (bool) $this->option('allow-remote'),
         );
     }

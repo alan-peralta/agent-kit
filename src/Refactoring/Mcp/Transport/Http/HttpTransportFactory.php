@@ -42,7 +42,7 @@ final class HttpTransportFactory
     public function middleware(string $method): array
     {
         $middleware = [
-            new CorsMiddleware(),
+            new CorsMiddleware(allowedOrigins: $this->options->allowedOrigins),
             new DnsRebindingProtectionMiddleware($this->options->allowedHosts, $this->responses, $this->streams),
         ];
 

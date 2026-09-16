@@ -96,6 +96,17 @@ final class RefactoringToolHandlerTest extends TestCase
         self::assertSame([], $capabilities->calls);
     }
 
+    public function test_a_target_with_control_characters_is_a_domain_error(): void
+    {
+        $capabilities = new RecordingCapabilities();
+
+        $result = $this->handler($capabilities, 'refactoring_analyze')->call(['target' => "Check\x00out.php"]);
+
+        self::assertTrue($result->isError);
+        self::assertSame('INVALID_TARGET', $result->structuredContent['error']['code']);
+        self::assertSame([], $capabilities->calls);
+    }
+
     public function test_the_adapter_never_touches_artisan_or_the_console_layer(): void
     {
         foreach ([

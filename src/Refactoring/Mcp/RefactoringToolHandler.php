@@ -73,6 +73,14 @@ final class RefactoringToolHandler implements ToolHandlerInterface
             throw new CapabilityException('INVALID_TARGET', 'The target argument must be a string.');
         }
 
-        return trim($target);
+        $target = trim($target);
+        // A NUL or any other control character inside the target can only come from a malformed
+        // client: it never occurs in a class name or a path, and it would otherwise travel into
+        // filesystem calls and log lines. Refuse it as a domain error, like any other bad target.
+        if (preg_match('/[\x00-\x1F\x7F]/', $target) === 1) {
+            throw new CapabilityException('INVALID_TARGET', 'The target argument must not contain control characters.');
+        }
+
+        return $target;
     }
 }

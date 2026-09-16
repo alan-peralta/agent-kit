@@ -14,11 +14,15 @@ trait SpawnsMcpServer
         return $this->packageRoot() . '/tests/Fixtures/Refactoring/Ast';
     }
 
-    /** @return list<string> */
-    protected function serverArguments(array $extra = []): array
+    /**
+     * @param  list<string>  $extra
+     * @param  string|null  $path  project root to serve; defaults to the AST fixture root
+     * @return list<string>
+     */
+    protected function serverArguments(array $extra = [], ?string $path = null): array
     {
         return array_merge(
-            [$this->packageRoot() . '/vendor/bin/testbench', 'agent-kit:mcp', '--path=' . $this->fixtureRoot()],
+            [$this->packageRoot() . '/vendor/bin/testbench', 'agent-kit:mcp', '--path=' . ($path ?? $this->fixtureRoot())],
             $extra,
         );
     }

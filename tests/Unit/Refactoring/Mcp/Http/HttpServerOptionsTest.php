@@ -91,6 +91,28 @@ final class HttpServerOptionsTest extends TestCase
         self::assertSame(['localhost', '127.0.0.1', '[::1]', 'tools.internal'], $options->allowedHosts);
     }
 
+    public function test_only_entries_with_a_scheme_become_cors_origins(): void
+    {
+        self::assertSame(
+            ['http://localhost:6274', 'https://claude.example'],
+            HttpServerOptions::parseOrigins(' http://LOCALHOST:6274 , mcp.internal:9000, https://claude.example/ '),
+        );
+
+        $options = HttpServerOptions::fromConfig($this->config(['allowed_origins' => 'http://localhost:6274,tools.internal']));
+        self::assertSame(['http://localhost:6274'], $options->allowedOrigins);
+        self::assertContains('localhost', $options->allowedHosts);
+        self::assertContains('tools.internal', $options->allowedHosts);
+
+        self::assertSame([], HttpServerOptions::fromConfig($this->config())->allowedOrigins);
+    }
+
+    public function test_the_endpoint_path_is_normalised(): void
+    {
+        self::assertSame('/mcp', HttpServerOptions::fromConfig($this->config(['path' => '/mcp/']))->path);
+        self::assertSame('/mcp', HttpServerOptions::fromConfig($this->config(['path' => 'mcp']))->path);
+        self::assertSame('/', HttpServerOptions::fromConfig($this->config(['path' => '/']))->path);
+    }
+
     public function test_ipv6_binds_are_bracketed_in_the_bind_uri(): void
     {
         self::assertSame('[::1]:8787', HttpServerOptions::fromConfig($this->config(), host: '::1')->bindUri());
