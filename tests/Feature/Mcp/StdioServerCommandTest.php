@@ -140,16 +140,35 @@ final class StdioServerCommandTest extends TestCase
         self::assertSame(0, $run['status'], $run['stderr']);
     }
 
-    public function test_spawning_the_server_leaves_no_env_example_copy_in_the_testbench_skeleton(): void
+    public function test_a_killed_server_leaves_no_env_example_copy_and_no_orphan_process(): void
     {
         [$process, $pipes] = $this->spawn($this->serverArguments(['--transport=stdio']));
-        fclose($pipes[0]);
+        // Wait until the server logs that it is listening, same as the SIGTERM test.
+        stream_set_blocking($pipes[2], false);
+        $deadline = microtime(true) + 20;
+        $stderr = '';
+        while (microtime(true) < $deadline && !str_contains($stderr, 'listening')) {
+            $stderr .= (string) stream_get_contents($pipes[2]);
+            usleep(50000);
+        }
+        self::assertStringContainsString('listening', $stderr);
 
-        $this->finish($process, $pipes);
+        // Do NOT close stdin: the server keeps listening, so finish() hits its timeout path and
+        // has to SIGKILL it - the abnormal exit that skips Testbench's own cleanup.
+        try {
+            $this->finish($process, $pipes, 1.0);
+            self::fail('finish() must time out.');
+        } catch (\PHPUnit\Framework\AssertionFailedError $e) {
+            self::assertStringContainsString('did not exit', $e->getMessage());
+        }
 
         $skeletonEnvironmentFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
-        $leftBehindIsHarmless = !is_file($skeletonEnvironmentFile)
-            || file_get_contents($skeletonEnvironmentFile) === file_get_contents($this->packageRoot() . '/tests/Fixtures/Mcp/testbench.env');
+        $skeletonContents = is_file($skeletonEnvironmentFile) ? file_get_contents($skeletonEnvironmentFile) : '';
+        $leftBehindIsHarmless = $skeletonContents === ''
+            || $skeletonContents === file_get_contents($this->packageRoot() . '/tests/Fixtures/Mcp/testbench.env');
         self::assertTrue($leftBehindIsHarmless, "{$skeletonEnvironmentFile} exists and does not match the harmless fixture.");
+        self::assertStringNotContainsString('AGENT_CONVERSATION_DRIVER', $skeletonContents);
+
+        self::assertSame('', trim((string) shell_exec('pgrep -f "agent-kit:mcp --transport=stdio" || true')));
     }
 }

@@ -33,12 +33,7 @@ trait SpawnsMcpServer
             }
         }
 
-        return array_merge($environment, [
-            'APP_ENV' => 'testing',
-            // Point Testbench's env-copy step at a harmless fixture instead of .env.example,
-            // so a spawned server that ends abnormally leaves nothing meaningful behind.
-            'TESTBENCH_ENVIRONMENT_FILENAME' => 'tests/Fixtures/Mcp/testbench.env',
-        ], $overrides);
+        return array_merge($environment, ['APP_ENV' => 'testing'], $overrides);
     }
 
     /**
@@ -46,6 +41,8 @@ trait SpawnsMcpServer
      */
     protected function spawn(array $arguments, array $environment = []): array
     {
+        $this->placeSkeletonEnvironmentFile();
+
         $process = proc_open(
             array_merge([PHP_BINARY], $arguments),
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
@@ -121,16 +118,44 @@ trait SpawnsMcpServer
         $this->removeSkeletonEnvironmentFile();
     }
 
+    private function skeletonEnvironmentFile(): string
+    {
+        return $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
+    }
+
     /**
-     * Best-effort cleanup: Testbench copies our fixture env into the skeleton app's .env on every
-     * run. A process that ends abnormally (e.g. SIGKILL after a timeout) skips Testbench's own
-     * termination cleanup and leaves that copy behind, where it pollutes every other test that
-     * boots the Testbench skeleton. Only remove it when its contents still match our harmless
-     * fixture, so a real .env some other tool put there is never touched.
+     * `Orchestra\Testbench\Console\Commander` (what `vendor/bin/testbench` runs) declares its own
+     * `$environmentFile = '.env'` property, so `CopyTestbenchFiles::testbenchEnvironmentFile()`'s
+     * `property_exists($this, 'environmentFile')` branch always wins before it ever checks the
+     * `TESTBENCH_ENVIRONMENT_FILENAME` env var - that env var is dead code for this CLI. But
+     * `Commander::laravel()` only copies an env file in at all when the skeleton has none yet
+     * (`is_file(<skeleton>/.env)`), so pre-placing our harmless fixture there ourselves makes the
+     * CLI skip the `.env.example` copy entirely and load our fixture instead, on every exit path
+     * including a SIGKILL that skips Testbench's own cleanup.
+     */
+    private function placeSkeletonEnvironmentFile(): void
+    {
+        $skeletonEnvironmentFile = $this->skeletonEnvironmentFile();
+        if (is_file($skeletonEnvironmentFile)) {
+            return;
+        }
+
+        $fixture = $this->packageRoot() . '/tests/Fixtures/Mcp/testbench.env';
+        if (!@copy($fixture, $skeletonEnvironmentFile)) {
+            self::fail("Could not copy the harmless testbench env fixture from {$fixture} to {$skeletonEnvironmentFile}.");
+        }
+    }
+
+    /**
+     * Best-effort cleanup: undo placeSkeletonEnvironmentFile() so the next spawn() (or any other
+     * test that boots the Testbench skeleton) sees a clean slate. Only remove the skeleton .env
+     * when its contents still match our harmless fixture, so a real .env some other tool put
+     * there - including one Testbench itself may have left after a graceful run that predates our
+     * fixture being placed - is never touched.
      */
     private function removeSkeletonEnvironmentFile(): void
     {
-        $skeletonEnvironmentFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
+        $skeletonEnvironmentFile = $this->skeletonEnvironmentFile();
         $fixture = $this->packageRoot() . '/tests/Fixtures/Mcp/testbench.env';
         if (!is_file($skeletonEnvironmentFile) || !is_file($fixture)) {
             return;
