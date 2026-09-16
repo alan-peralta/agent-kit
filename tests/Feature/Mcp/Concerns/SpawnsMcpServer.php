@@ -76,12 +76,42 @@ trait SpawnsMcpServer
             usleep(20000);
         } while (microtime(true) < $deadline);
 
-        if ($status['running']) {
+        $timedOut = $status['running'];
+        if ($timedOut) {
             proc_terminate($process, 9);
-            self::fail("The MCP server did not exit within {$timeoutSeconds}s.\nSTDERR:\n{$stderr}");
+            // Give the OS a moment to actually reap the killed process, draining whatever it
+            // still flushes, so the cleanup below runs even in this abnormal-exit path -
+            // the exact case that used to leave the Testbench skeleton .env behind.
+            $killDeadline = microtime(true) + 2;
+            do {
+                $stdout .= (string) stream_get_contents($pipes[1]);
+                $stderr .= (string) stream_get_contents($pipes[2]);
+                $status = proc_get_status($process);
+                if (!$status['running']) {
+                    break;
+                }
+                usleep(20000);
+            } while (microtime(true) < $killDeadline);
         }
+
         $stdout .= (string) stream_get_contents($pipes[1]);
         $stderr .= (string) stream_get_contents($pipes[2]);
+        $this->closeProcess($process, $pipes);
+
+        if ($timedOut) {
+            self::fail("The MCP server did not exit within {$timeoutSeconds}s.\nSTDERR:\n{$stderr}");
+        }
+
+        return ['status' => $status['exitcode'], 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    /**
+     * Release the process's OS resources and run the best-effort skeleton-env cleanup. Shared by
+     * the normal-exit and timeout paths in finish() so a force-killed process is cleaned up
+     * exactly like a naturally-exited one, instead of skipping cleanup on the timeout path.
+     */
+    private function closeProcess($process, array $pipes): void
+    {
         foreach ($pipes as $pipe) {
             if (is_resource($pipe)) {
                 fclose($pipe);
@@ -89,8 +119,6 @@ trait SpawnsMcpServer
         }
         proc_close($process);
         $this->removeSkeletonEnvironmentFile();
-
-        return ['status' => $status['exitcode'], 'stdout' => $stdout, 'stderr' => $stderr];
     }
 
     /**
