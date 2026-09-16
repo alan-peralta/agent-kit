@@ -15,7 +15,7 @@ class GeminiProviderTest extends TestCase
 {
     use MocksGuzzleHttp;
 
-    public function test_chat_sends_api_key_in_query_string_and_correct_payload()
+    public function test_chat_sends_api_key_in_header_and_correct_payload()
     {
         [$provider, $history] = $this->provider([
             new Response(200, [], json_encode([
@@ -28,7 +28,9 @@ class GeminiProviderTest extends TestCase
 
         $request = $history[0]['request'];
         $this->assertSame('POST', $request->getMethod());
-        $this->assertStringContainsString('models/gemini-x:generateContent?key=secret-key', (string) $request->getUri());
+        $this->assertSame('http://api.test/models/gemini-x:generateContent', (string) $request->getUri());
+        $this->assertSame('secret-key', $request->getHeaderLine('x-goog-api-key'));
+        $this->assertStringNotContainsString('secret-key', (string) $request->getUri());
 
         $body = json_decode((string) $request->getBody(), true);
         $this->assertSame('seja breve', $body['systemInstruction']['parts'][0]['text']);

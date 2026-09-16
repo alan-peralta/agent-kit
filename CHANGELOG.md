@@ -28,6 +28,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Carregamento apenas da migration `agent_kit_metrics` nos testes, em vez do diretório completo.
 
 ### Alterado
+- `GeminiProvider` e `GeminiEmbedder` passam a enviar a chave de API no header `x-goog-api-key` em vez da query string `?key=`, evitando vazamento da credencial em logs de acesso, proxies e históricos de URL.
 - Limpeza da resolução e nomenclatura de providers em `Agent::send()`.
 - Substituição de chamadas diretas a `Log` por eventos e listeners de log.
 - Extração de helper compartilhado do Guzzle `MockHandler` para uma trait usada pelos testes de providers.

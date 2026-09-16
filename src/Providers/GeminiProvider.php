@@ -46,8 +46,13 @@ class GeminiProvider extends AbstractProvider
             ]];
         }
 
-        $data = $this->request('POST', "models/{$model}:generateContent?key={$apiKey}", [
-            'headers' => ['Content-Type' => 'application/json'],
+        // A chave vai no header x-goog-api-key, nunca na query string,
+        // para não vazar em logs de acesso, proxies e históricos de URL.
+        $data = $this->request('POST', "models/{$model}:generateContent", [
+            'headers' => [
+                'Content-Type' => 'application/json',
+                'x-goog-api-key' => $apiKey,
+            ],
             'json' => $payload,
         ]);
 

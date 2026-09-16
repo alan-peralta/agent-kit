@@ -76,6 +76,8 @@ AGENT_EMBEDDER=gemini
 GEMINI_API_KEY=xxxxx
 ```
 
+A chave é enviada no header `x-goog-api-key` (nunca na query string), então não aparece em logs de acesso nem em proxies.
+
 **Uso no código:**
 
 ```php

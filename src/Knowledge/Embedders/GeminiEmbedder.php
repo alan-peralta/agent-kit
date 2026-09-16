@@ -18,10 +18,16 @@ class GeminiEmbedder implements Embedder
 
     public function __construct(protected array $config)
     {
-        $this->http = new Client([
+        $options = [
             'base_uri' => rtrim($config['base_url'], '/') . '/',
             'timeout' => 60,
-        ]);
+        ];
+
+        if (isset($config['handler'])) {
+            $options['handler'] = $config['handler'];
+        }
+
+        $this->http = new Client($options);
     }
 
     public function embed(string $text): array
@@ -38,8 +44,9 @@ class GeminiEmbedder implements Embedder
         try {
             foreach ($texts as $text) {
                 $response = $this->http->post('v1beta/models/embedding-001:embedContent', [
-                    'query' => [
-                        'key' => $this->config['api_key'],
+                    // Chave via header, nunca na query string (evita vazamento em logs/proxies)
+                    'headers' => [
+                        'x-goog-api-key' => $this->config['api_key'],
                     ],
                     'json' => [
                         'model' => 'models/embedding-001',
