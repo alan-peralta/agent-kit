@@ -33,7 +33,12 @@ trait SpawnsMcpServer
             }
         }
 
-        return array_merge($environment, ['APP_ENV' => 'testing'], $overrides);
+        return array_merge($environment, [
+            'APP_ENV' => 'testing',
+            // Point Testbench's env-copy step at a harmless fixture instead of .env.example,
+            // so a spawned server that ends abnormally leaves nothing meaningful behind.
+            'TESTBENCH_ENVIRONMENT_FILENAME' => 'tests/Fixtures/Mcp/testbench.env',
+        ], $overrides);
     }
 
     /**
@@ -83,7 +88,28 @@ trait SpawnsMcpServer
             }
         }
         proc_close($process);
+        $this->removeSkeletonEnvironmentFile();
 
         return ['status' => $status['exitcode'], 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    /**
+     * Best-effort cleanup: Testbench copies our fixture env into the skeleton app's .env on every
+     * run. A process that ends abnormally (e.g. SIGKILL after a timeout) skips Testbench's own
+     * termination cleanup and leaves that copy behind, where it pollutes every other test that
+     * boots the Testbench skeleton. Only remove it when its contents still match our harmless
+     * fixture, so a real .env some other tool put there is never touched.
+     */
+    private function removeSkeletonEnvironmentFile(): void
+    {
+        $skeletonEnvironmentFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
+        $fixture = $this->packageRoot() . '/tests/Fixtures/Mcp/testbench.env';
+        if (!is_file($skeletonEnvironmentFile) || !is_file($fixture)) {
+            return;
+        }
+
+        if (file_get_contents($skeletonEnvironmentFile) === file_get_contents($fixture)) {
+            @unlink($skeletonEnvironmentFile);
+        }
     }
 }

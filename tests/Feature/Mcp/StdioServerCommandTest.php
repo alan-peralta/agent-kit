@@ -139,4 +139,17 @@ final class StdioServerCommandTest extends TestCase
 
         self::assertSame(0, $run['status'], $run['stderr']);
     }
+
+    public function test_spawning_the_server_leaves_no_env_example_copy_in_the_testbench_skeleton(): void
+    {
+        [$process, $pipes] = $this->spawn($this->serverArguments(['--transport=stdio']));
+        fclose($pipes[0]);
+
+        $this->finish($process, $pipes);
+
+        $skeletonEnvironmentFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
+        $leftBehindIsHarmless = !is_file($skeletonEnvironmentFile)
+            || file_get_contents($skeletonEnvironmentFile) === file_get_contents($this->packageRoot() . '/tests/Fixtures/Mcp/testbench.env');
+        self::assertTrue($leftBehindIsHarmless, "{$skeletonEnvironmentFile} exists and does not match the harmless fixture.");
+    }
 }
