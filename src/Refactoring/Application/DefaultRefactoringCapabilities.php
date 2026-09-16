@@ -7,7 +7,7 @@ use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndex;
-use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectRoot;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
@@ -19,7 +19,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         private readonly ProjectScanner $scanner,
         private readonly PhpFileAnalyzer $fileAnalyzer,
         private readonly RefactoringReport $report,
-        private readonly CodebaseIndexer $indexer,
+        private readonly CodebaseIndexBuilder $indexer,
         private readonly CallerAnalyzer $callers,
         private readonly ImpactAnalyzer $impactAnalyzer,
     ) {}

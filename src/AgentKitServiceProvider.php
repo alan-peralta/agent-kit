@@ -43,7 +43,10 @@ use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CachedCodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\ProjectFingerprint;
 use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
 use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
@@ -271,6 +274,16 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(ProjectScanner::class),
             $app->make(AstParser::class),
         ));
+        $this->app->singleton(ProjectFingerprint::class, fn ($app) => new ProjectFingerprint(
+            $app->make(ProjectScanner::class),
+        ));
+        // One cache per process: the MCP server keeps it for its whole life, the CLI for one command.
+        $this->app->singleton(CachedCodebaseIndexer::class, fn ($app) => new CachedCodebaseIndexer(
+            $app->make(CodebaseIndexer::class),
+            $app->make(ProjectFingerprint::class),
+            max(1, (int) config('agent-kit.mcp.index_cache.max_entries', 1)),
+        ));
+        $this->app->bind(CodebaseIndexBuilder::class, fn ($app) => $app->make(CachedCodebaseIndexer::class));
         $this->app->singleton(CallerAnalyzer::class);
         $this->app->bind(ImpactAnalyzer::class, fn () => new ImpactAnalyzer(
             config('agent-kit.refactoring.impact_thresholds', []),
@@ -279,7 +292,7 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(ProjectScanner::class),
             $app->make(PhpFileAnalyzer::class),
             $app->make(RefactoringReport::class),
-            $app->make(CodebaseIndexer::class),
+            $app->make(CodebaseIndexBuilder::class),
             $app->make(CallerAnalyzer::class),
             $app->make(ImpactAnalyzer::class),
         ));
