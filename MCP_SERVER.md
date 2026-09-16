@@ -38,7 +38,7 @@ are identical.
 | `AGENT_KIT_MCP_HTTP_PORT` | `8787` | bind port (`--port` overrides) |
 | `AGENT_KIT_MCP_HTTP_PATH` | `/mcp` | the single MCP endpoint |
 | `AGENT_KIT_MCP_ALLOW_REMOTE` | `false` | allow non-loopback binds (`--allow-remote` overrides) |
-| `AGENT_KIT_MCP_ALLOWED_ORIGINS` | *(empty)* | extra allowed hosts/origins, comma-separated |
+| `AGENT_KIT_MCP_ALLOWED_ORIGINS` | *(empty)* | comma-separated extra allowed hosts; entries with a scheme also enable CORS for that exact origin |
 | `AGENT_KIT_MCP_BEARER_TOKEN` | *(empty)* | required for HTTP, 32+ characters |
 | `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` … `AGENT_KIT_MCP_HTTP_MAX_SESSIONS` | see [Limits](#limits-and-lifecycle) | request and session bounds |
 | `AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES` | `1` | cached roots per process |
@@ -169,6 +169,22 @@ The SDK `DnsRebindingProtectionMiddleware` enforces a host allowlist:
 pass through this same allowlist before being answered. Remote clients must
 therefore address the server through an allowlisted hostname.
 
+An entry of `AGENT_KIT_MCP_ALLOWED_ORIGINS` does two different things depending
+on whether it carries a scheme:
+
+- `http://localhost:6274` (a full origin) extends the host allowlist **and**
+  enables CORS for that exact origin: a matching request gets
+  `Access-Control-Allow-Origin: http://localhost:6274`, which is what browser
+  clients such as the MCP Inspector need.
+- `mcp.internal` (a bare host) only extends the host allowlist; no CORS header
+  is ever emitted for it.
+
+With no origins configured — the default — the server never sends
+`Access-Control-Allow-Origin`, so a browser cannot read a response even when the
+request itself is allowlisted. Scheme, host and port must match exactly;
+`http://localhost:6274` does not cover `https://localhost:6274` or
+`http://127.0.0.1:6274`.
+
 ### Limits and lifecycle
 
 | Variable | Default | Effect |
@@ -208,6 +224,7 @@ projects and concurrency bounded instead.
 | `DELETE` with a session | `200`; without | `400` |
 | Path other than the endpoint | `404` |
 | Internal failure | `500` with a fixed JSON body, details only on stderr |
+| `Accept` header | not validated by `mcp/sdk` 0.8.x on the handshake transport; send `Accept: application/json, text/event-stream` anyway (the SDK client does) |
 
 ## Client configuration
 
@@ -304,7 +321,9 @@ Troubleshooting:
 - *`401` on HTTP*: the header must be exactly `Authorization: Bearer <token>`;
   tokens in the URL are ignored.
 - *`403` on HTTP*: add the client's origin host to
-  `AGENT_KIT_MCP_ALLOWED_ORIGINS`.
+  `AGENT_KIT_MCP_ALLOWED_ORIGINS`. A browser client that reaches the server but
+  cannot read the response needs the **full** origin (`http://host:port`) there,
+  not just the host, so CORS answers with `Access-Control-Allow-Origin`.
 - *`Refusing to bind ... --allow-remote`*: non-loopback binds are opt-in.
 - *`Could not bind the MCP HTTP transport ... Use an IP literal`*: `--host`
   resolved to a hostname other than `localhost`; pass an IP literal instead.

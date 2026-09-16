@@ -245,7 +245,7 @@ The capability-specific `data` properties are taken from the existing payloads (
 }
 ```
 
-A unit test asserts that the resource's `tools` list, `tools/list`, and the `mcp_tool` names in `describeCapabilities()` are the same set, so no second list can drift.
+A unit test asserts that every capability descriptor's `mcp_tool` names exactly one catalog tool and that the catalog's non-discovery tools cover exactly the descriptors, so no second list can drift.
 
 ## 8. Project root and isolation
 
