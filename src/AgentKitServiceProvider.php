@@ -66,6 +66,7 @@ use Peralta\AgentKit\Refactoring\Mcp\Commands\McpServeCommand;
 use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\RefactoringToolCatalog;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\ReactHttpListener;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\StdioServerRunner;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
@@ -335,6 +336,10 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(RefactoringToolCatalog::class),
         ));
         $this->app->bind(StdioServerRunner::class, fn ($app) => new StdioServerRunner(
+            $app->make(McpServerFactory::class),
+            $app->make(CachedCodebaseIndexer::class),
+        ));
+        $this->app->bind(ReactHttpListener::class, fn ($app) => new ReactHttpListener(
             $app->make(McpServerFactory::class),
             $app->make(CachedCodebaseIndexer::class),
         ));
