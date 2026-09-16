@@ -142,7 +142,8 @@ final class StdioServerCommandTest extends TestCase
 
     public function test_a_killed_server_leaves_no_env_example_copy_and_no_orphan_process(): void
     {
-        [$process, $pipes] = $this->spawn($this->serverArguments(['--transport=stdio']));
+        $arguments = $this->serverArguments(['--transport=stdio']);
+        [$process, $pipes] = $this->spawn($arguments);
         // Wait until the server logs that it is listening, same as the SIGTERM test.
         stream_set_blocking($pipes[2], false);
         $deadline = microtime(true) + 20;
@@ -152,6 +153,11 @@ final class StdioServerCommandTest extends TestCase
             usleep(50000);
         }
         self::assertStringContainsString('listening', $stderr);
+
+        // While the server is alive the pgrep pattern must match it. Without this the "no orphan
+        // process" assertion at the end of the test would be vacuous: a pattern that matches
+        // nothing at all also matches nothing after the kill.
+        self::assertNotSame('', $this->runningServerProcesses($arguments));
 
         // Do NOT close stdin: the server keeps listening, so finish() hits its timeout path and
         // has to SIGKILL it - the abnormal exit that skips Testbench's own cleanup.
@@ -169,6 +175,6 @@ final class StdioServerCommandTest extends TestCase
         self::assertTrue($leftBehindIsHarmless, "{$skeletonEnvironmentFile} exists and does not match the harmless fixture.");
         self::assertStringNotContainsString('AGENT_CONVERSATION_DRIVER', $skeletonContents);
 
-        self::assertSame('', trim((string) shell_exec('pgrep -f "agent-kit:mcp --transport=stdio" || true')));
+        self::assertSame('', $this->runningServerProcesses($arguments));
     }
 }

@@ -118,6 +118,28 @@ trait SpawnsMcpServer
         $this->removeSkeletonEnvironmentFile();
     }
 
+    /**
+     * The trimmed `pgrep -f` output for servers spawned with $arguments, so a test can assert both
+     * that a spawned server is really running and that it is really gone afterwards.
+     *
+     * The pattern is derived from the argv we actually spawn instead of being hard-coded, because a
+     * hard-coded one silently drifts: spawn() runs `<php> <testbench> agent-kit:mcp --path=<root>
+     * --transport=stdio`, so a literal "agent-kit:mcp --transport=stdio" never appears in the child's
+     * command line and such a pgrep can never match. `pgrep -f` matches an extended regex against the
+     * whole (space-joined) command line, so we only have to escape the ERE metacharacters.
+     *
+     * @param list<string> $arguments the same array that was handed to spawn()
+     */
+    private function runningServerProcesses(array $arguments): string
+    {
+        $pattern = implode(' ', array_map(
+            static fn (string $argument): string => preg_replace('/[.\\\\*+?\[\]^$(){}|]/', '\\\\$0', $argument),
+            $arguments,
+        ));
+
+        return trim((string) shell_exec('pgrep -f ' . escapeshellarg($pattern) . ' || true'));
+    }
+
     private function skeletonEnvironmentFile(): string
     {
         return $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
