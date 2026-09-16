@@ -4392,6 +4392,29 @@ are identical.
 - Streamable HTTP additionally needs `react/http`:
   `composer require react/http`.
 
+## Configuration
+
+`config/agent-kit.php` → `mcp` (publish with `php artisan vendor:publish --tag=agent-kit-config`):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `AGENT_KIT_MCP_ENABLED` | `true` | `false` makes `agent-kit:mcp` refuse to start |
+| `AGENT_KIT_MCP_TRANSPORT` | `stdio` | default transport when `--transport` is omitted |
+| `AGENT_KIT_MCP_PROJECT_ROOT` | *(empty = base path)* | project root when `--path` is omitted |
+| `AGENT_KIT_MCP_HTTP_ENABLED` | `false` | opt-in for Streamable HTTP |
+| `AGENT_KIT_MCP_HTTP_HOST` | `127.0.0.1` | bind host (`--host` overrides) |
+| `AGENT_KIT_MCP_HTTP_PORT` | `8787` | bind port (`--port` overrides) |
+| `AGENT_KIT_MCP_HTTP_PATH` | `/mcp` | the single MCP endpoint |
+| `AGENT_KIT_MCP_ALLOW_REMOTE` | `false` | allow non-loopback binds (`--allow-remote` overrides) |
+| `AGENT_KIT_MCP_ALLOWED_ORIGINS` | *(empty)* | extra allowed hosts/origins, comma-separated |
+| `AGENT_KIT_MCP_BEARER_TOKEN` | *(empty)* | required for HTTP, 32+ characters |
+| `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` … `AGENT_KIT_MCP_HTTP_MAX_SESSIONS` | see [Limits](#limits-and-lifecycle) | request and session bounds |
+| `AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES` | `1` | cached roots per process |
+| `AGENT_KIT_MCP_LOG_LEVEL` / `AGENT_KIT_MCP_LOG_CHANNEL` | `info` / *(stderr)* | logging |
+
+Command options: `--transport=stdio|http`, `--path=`, `--host=`, `--port=`,
+`--allow-remote`.
+
 ## Tools
 
 | Tool | Capability | Arguments | Returns |
