@@ -30,38 +30,41 @@ final class HttpTransportFactory
         return new self($options, $factory, $factory);
     }
 
-    /** @return list<MiddlewareInterface> outermost first: CORS, Origin/Host allowlist, bearer auth */
-    public function middleware(): array
+    /**
+     * @return list<MiddlewareInterface> outermost first: CORS, Origin/Host allowlist, bearer auth.
+     *
+     * Bearer authentication is omitted only for `OPTIONS`: a CORS preflight never
+     * carries an `Authorization` header (browsers strip credentials from preflight
+     * requests by design), and the SDK answers `OPTIONS` with an empty 204 before
+     * any JSON-RPC processing ever runs. CORS and the Origin/Host allowlist always
+     * apply, `OPTIONS` included.
+     */
+    public function middleware(string $method): array
     {
-        return [
+        $middleware = [
             new CorsMiddleware(),
             new DnsRebindingProtectionMiddleware($this->options->allowedHosts, $this->responses, $this->streams),
-            new BearerTokenAuthenticationMiddleware(
+        ];
+
+        if ($method !== 'OPTIONS') {
+            $middleware[] = new BearerTokenAuthenticationMiddleware(
                 new StaticBearerTokenValidator($this->options->bearerToken),
                 $this->responses,
                 $this->streams,
-            ),
-        ];
+            );
+        }
+
+        return $middleware;
     }
 
     public function create(ServerRequestInterface $request, LoggerInterface $logger): StreamableHttpTransport
     {
-        // A CORS preflight (OPTIONS) never carries credentials -- browsers strip
-        // them by design -- so bearer auth would reject every preflight and break
-        // real cross-origin clients. CORS and the Origin/Host allowlist still run.
-        $middleware = $request->getMethod() === 'OPTIONS'
-            ? array_values(array_filter(
-                $this->middleware(),
-                static fn (MiddlewareInterface $entry): bool => !$entry instanceof BearerTokenAuthenticationMiddleware,
-            ))
-            : $this->middleware();
-
         return new StreamableHttpTransport(
             $request,
             $this->responses,
             $this->streams,
             $logger,
-            $middleware,
+            $this->middleware($request->getMethod()),
             $this->options->maxBodyBytes,
         );
     }

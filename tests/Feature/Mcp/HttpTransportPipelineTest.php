@@ -41,6 +41,12 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertSame(204, $this->send('OPTIONS', [])->getStatusCode());
     }
 
+    public function test_options_from_a_disallowed_origin_is_403_even_without_authentication(): void
+    {
+        self::assertSame(403, $this->send('OPTIONS', ['Origin' => 'http://evil.example'])->getStatusCode());
+        self::assertSame(204, $this->send('OPTIONS', ['Origin' => 'http://localhost:6274'])->getStatusCode());
+    }
+
     public function test_requests_without_a_bearer_token_are_401_before_any_mcp_processing(): void
     {
         $response = $this->send('POST', [], $this->initialize());
@@ -55,6 +61,19 @@ final class HttpTransportPipelineTest extends TestCase
     {
         self::assertSame(401, $this->send('POST', ['Authorization' => 'Bearer nope-' . self::TOKEN], $this->initialize())->getStatusCode());
         self::assertSame(401, $this->send('POST', [], $this->initialize(), self::ENDPOINT . '?access_token=' . self::TOKEN)->getStatusCode());
+    }
+
+    public function test_a_malformed_authorization_header_is_400_before_any_mcp_processing(): void
+    {
+        $basicScheme = $this->send('POST', ['Authorization' => 'Basic abc'], $this->initialize());
+        self::assertSame(400, $basicScheme->getStatusCode());
+        self::assertStringStartsWith('Bearer', $basicScheme->getHeaderLine('WWW-Authenticate'));
+        self::assertFalse($basicScheme->hasHeader('Mcp-Session-Id'));
+
+        $noToken = $this->send('POST', ['Authorization' => 'Bearer'], $this->initialize());
+        self::assertSame(400, $noToken->getStatusCode());
+        self::assertStringStartsWith('Bearer', $noToken->getHeaderLine('WWW-Authenticate'));
+        self::assertFalse($noToken->hasHeader('Mcp-Session-Id'));
     }
 
     public function test_a_disallowed_origin_is_403_even_without_credentials(): void
@@ -143,6 +162,7 @@ final class HttpTransportPipelineTest extends TestCase
         $response = $factory->handle($this->server, new ServerRequest('POST', self::ENDPOINT, $this->auth(), str_repeat('{"jsonrpc":"2.0"}', 10)), new NullLogger());
 
         self::assertSame(413, $response->getStatusCode());
+        $this->assertNoSecrets($response);
     }
 
     public function test_unrouted_paths_are_404(): void
@@ -163,6 +183,7 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertSame(500, $response->getStatusCode());
         self::assertSame(['error' => 'internal_error', 'message' => 'The MCP server could not process the request.'], json_decode((string) $response->getBody(), true));
         self::assertStringNotContainsString('/secret/path', (string) $response->getBody());
+        $this->assertNoSecrets($response);
     }
 
     private function openSession(): string
