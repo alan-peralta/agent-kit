@@ -70,13 +70,16 @@ Targets may be project-relative PHP files, fully qualified classes, or
 
 The generated instructions gather evidence in this order:
 
-1. A compatible MCP capability, when one is available.
+1. The Agent Kit MCP tools when the server is connected: `refactoring_capabilities`,
+   `refactoring_audit`, `refactoring_analyze`, `refactoring_callers`,
+   `refactoring_dependencies`, `refactoring_impact`.
 2. The corresponding `php artisan agent-kit:refactor-* --json` command.
 3. Repository search plus source and test reading for missing context.
 4. LLM inference for interpretation only, never for invented relationships.
 
-An Agent Kit MCP server does **not** exist yet; MCP is a future adapter. The
-direct CLI is therefore the deterministic fallback today, for example:
+Start the MCP server with `php artisan agent-kit:mcp --path=/project` (stdio)
+or `--transport=http` for Streamable HTTP; see [MCP_SERVER.md](MCP_SERVER.md).
+The direct CLI remains the deterministic fallback, for example:
 
 ```bash
 php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json --path=/project
@@ -85,10 +88,10 @@ php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --js
 Responses separate `FACTS`, `INTERPRETATION`, and `RECOMMENDATIONS`. Dynamic
 behavior that static analysis cannot resolve remains explicitly unknown or
 unresolved. `ANALYZE != MODIFY`: the six skills audit, explain, or plan only.
-No `/refactor-apply` command is generated.
+No `/refactor-apply` command is generated. No `refactoring_apply` tool exists.
 
 The architecture stays deliberately small: one Refactoring Core provides the
-capabilities shared by the direct CLI, Cursor/Claude Code adapters, and a future
+capabilities shared by the direct CLI, the Cursor/Claude Code adapters, and the
 MCP server. Agent-specific adapters render native skill and rule files from the
 same canonical command repository instead of duplicating analysis logic.
 
@@ -252,6 +255,10 @@ Text output warns that results may be incomplete; JSON includes file, line, and
 message in `diagnostics`. An invalid project root or missing target class fails
 the command clearly.
 
+The MCP server keeps the index in memory between calls and rebuilds it only when
+a content fingerprint of the included PHP files changes; separate CLI invocations
+still build their own index.
+
 ## Static-analysis limits
 
 The first version does not execute code, resolve runtime container bindings,
@@ -279,6 +286,7 @@ Use this order when an LLM consumes the report:
 
 ## Roadmap
 
-Next iterations can add persistent path/mtime/hash index caching, method-level
-cyclomatic complexity, duplicate detection, architecture constraints, baseline
-comparison, and an MCP server adapter for the existing reusable capabilities.
+Next iterations can add method-level cyclomatic complexity, duplicate detection,
+architecture constraints, baseline comparison, an OAuth resource-server mode for
+the MCP HTTP transport, and serving the MCP endpoint from the host application's
+own web server.

@@ -310,19 +310,17 @@ Cursor e Claude Code recebem os mesmos seis comandos portáveis:
 
 Exemplo: `/refactor-impact App\Services\PaymentService::charge`.
 
-As skills tentam obter fatos na ordem: MCP compatível, CLI
-`agent-kit:refactor-* --json`, leitura/pesquisa no repositório e, por último,
-interpretação do LLM. Elas separam `FACTS`, `INTERPRETATION` e
-`RECOMMENDATIONS`, sinalizam comportamento dinâmico não resolvido e mantêm
-`ANALYZE != MODIFY`. O MCP ainda não está disponível; é uma integração futura.
-Hoje, a CLI direta — por exemplo,
-`php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge" --json`
-— é o fallback determinístico.
+As skills tentam obter fatos na ordem: tools MCP do Agent Kit (`refactoring_audit`,
+`refactoring_analyze`, `refactoring_callers`, `refactoring_dependencies`,
+`refactoring_impact`), CLI `agent-kit:refactor-* --json`, leitura/pesquisa no
+repositório e, por último, interpretação do LLM. Elas separam `FACTS`,
+`INTERPRETATION` e `RECOMMENDATIONS`, sinalizam comportamento dinâmico não
+resolvido e mantêm `ANALYZE != MODIFY`.
 
-O Refactoring Core é compartilhado pela CLI, pelos coding agents e pelo futuro
-servidor MCP. No `/refactor-plan`, a saída é somente um plano. No `/refactor-audit`
-e nos demais comandos, a saída é somente análise. No command applies changes
-automatically. No `/refactor-apply` command is generated.
+O Refactoring Core é compartilhado pela CLI, pelos coding agents e pelo servidor
+MCP. No `/refactor-plan`, a saída é somente um plano. No `/refactor-audit` e nos
+demais comandos, a saída é somente análise. Nenhum comando aplica mudanças
+automaticamente. No `/refactor-apply` command is generated.
 
 ```text
                Refactoring Core
@@ -331,3 +329,23 @@ automatically. No `/refactor-apply` command is generated.
       v              v              v
      CLI        Coding Agents       MCP
 ```
+
+## Servidor MCP
+
+O pacote inclui um servidor MCP (`mcp/sdk` oficial) que expõe as seis tools
+somente-leitura acima a Claude Code, Cursor, Codex, MCP Inspector e clientes
+Streamable HTTP:
+
+```bash
+# stdio (padrão) — use em .mcp.json / .cursor/mcp.json / ~/.codex/config.toml
+php artisan agent-kit:mcp --path=/caminho/absoluto/do/projeto
+
+# Streamable HTTP — opt-in, bind em 127.0.0.1, bearer token obrigatório
+AGENT_KIT_MCP_HTTP_ENABLED=true AGENT_KIT_MCP_BEARER_TOKEN=... \
+php artisan agent-kit:mcp --transport=http --path=/caminho/absoluto/do/projeto --port=8787
+```
+
+Configuração em `config/agent-kit.php` (`mcp`) e variáveis `AGENT_KIT_MCP_*`
+no `.env.example`. Veja [MCP_SERVER.md](MCP_SERVER.md) para transporte,
+autenticação, origins permitidas, cache do índice, exemplos por cliente,
+diagnóstico e limitações.

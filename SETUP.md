@@ -54,6 +54,11 @@ AGENT_DISCORD_MENTION=
 # Analytics & Monitoring (opcional)
 AGENT_KIT_ANALYTICS_ENABLED=true
 AGENT_KIT_ANALYTICS_PERSIST=false
+
+# Servidor MCP (opcional - Claude Code, Cursor, Codex, Inspector)
+AGENT_KIT_MCP_ENABLED=true
+AGENT_KIT_MCP_HTTP_ENABLED=false
+# AGENT_KIT_MCP_BEARER_TOKEN=   # obrigatório só para --transport=http (32+ chars)
 ```
 
 ### Opções de Provider:
@@ -410,6 +415,12 @@ php artisan config:clear
 ```bash
 tail -f storage/logs/laravel.log
 ```
+
+### Servidor MCP não conecta?
+
+- stdio: rode `php artisan agent-kit:mcp --path=/projeto < /dev/null` e leia o stderr; erros de inicialização retornam código 1.
+- HTTP: confira `AGENT_KIT_MCP_HTTP_ENABLED=true`, `AGENT_KIT_MCP_BEARER_TOKEN` com 32+ caracteres e o header `Authorization: Bearer <token>`; `403` indica origin/host fora de `AGENT_KIT_MCP_ALLOWED_ORIGINS`.
+- Detalhes em [MCP_SERVER.md](MCP_SERVER.md).
 
 ---
 
