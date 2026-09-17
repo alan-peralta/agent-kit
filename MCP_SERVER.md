@@ -272,8 +272,23 @@ args = ["/absolute/path/to/laravel-app/artisan", "agent-kit:mcp", "--path=/absol
 
 ### MCP Inspector
 
+The Inspector CLI treats `--…` arguments after the server command as its own
+options, so an inline `--path=…` is silently dropped and the server falls back
+to the Laravel base path. Pass the project root through the environment, or
+describe the server in a config file with the same shape as `.mcp.json`:
+
 ```bash
-npx @modelcontextprotocol/inspector php /absolute/path/to/laravel-app/artisan agent-kit:mcp --path=/absolute/path/to/project
+# Environment variable (place -e after the server command in --cli mode)
+npx @modelcontextprotocol/inspector --cli php /absolute/path/to/laravel-app/artisan agent-kit:mcp \
+  -e AGENT_KIT_MCP_PROJECT_ROOT=/absolute/path/to/project --method tools/list
+
+# Config file: reuse the Claude Code / Cursor JSON above
+npx @modelcontextprotocol/inspector --cli --config .mcp.json --server agent-kit-refactoring \
+  --method tools/call --tool-name refactoring_impact --tool-arg 'target=App\Services\PaymentService::charge'
+
+# Interactive UI
+npx @modelcontextprotocol/inspector --config .mcp.json --server agent-kit-refactoring
+
 # Streamable HTTP (listener already running):
 npx @modelcontextprotocol/inspector http://127.0.0.1:8787/mcp
 ```
