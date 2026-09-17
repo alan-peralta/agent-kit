@@ -4,6 +4,7 @@ namespace Peralta\AgentKit\Tests\Unit\Refactoring\Ast;
 
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyType;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PhpAstParserTest extends TestCase
@@ -140,6 +141,64 @@ PHP);
         $this->assertCount(1, $calls);
         $this->assertNull($calls[0]->target);
         $this->assertSame('unknown', $calls[0]->confidence->value);
+    }
+
+    #[DataProvider('proceduralCode')]
+    public function test_it_parses_code_outside_classes_without_scope_errors(string $code, ?string $expectedClass): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'procedural-php-');
+        file_put_contents($file, $code);
+        // Laravel converts warnings into ErrorException at runtime; mirror that so a
+        // scope-stack underflow ("array offset on null") fails here instead of passing silently.
+        set_error_handler(static function (int $severity, string $message, string $filename, int $line): bool {
+            throw new \ErrorException($message, 0, $severity, $filename, $line);
+        });
+
+        try {
+            $parsed = (new PhpAstParser())->parse($file, 'procedural.php');
+        } finally {
+            restore_error_handler();
+            unlink($file);
+        }
+
+        $this->assertSame([], $parsed->diagnostics);
+        if ($expectedClass === null) {
+            $this->assertSame([], $parsed->symbols);
+
+            return;
+        }
+
+        $symbols = [];
+        foreach ($parsed->symbols as $symbol) {
+            $symbols[$symbol->fqcn] = $symbol;
+        }
+        $this->assertArrayHasKey($expectedClass, $symbols);
+        $this->assertTrue($this->hasFrom($parsed->references, $expectedClass, DependencyType::METHOD_CALL, 'Demo\\Service'));
+    }
+
+    public static function proceduralCode(): array
+    {
+        $class = <<<'PHP'
+
+class Service { public function run(): void {} }
+class Caller {
+    public function __construct(private Service $service) {}
+    public function go(): void { if ($this->service) { $this->service->run(); } }
+}
+PHP;
+
+        return [
+            'top-level closure' => ["<?php\n\$app = function (\$request) { return \$request; };", null],
+            'top-level arrow function' => ["<?php\n\$double = fn (\$value) => \$value * 2;", null],
+            'top-level if' => ["<?php\nif (\$argc > 1) { \$mode = 'verbose'; } else { \$mode = 'quiet'; }", null],
+            'top-level ternary and coalesce' => ["<?php\nreturn ['debug' => \$env ?? false, 'url' => \$secure ? 'https' : 'http'];", null],
+            'top-level match, try and loops' => ["<?php\ntry { foreach ([1] as \$i) { \$x = match (\$i) { 1 => 'a', default => 'b' }; } } catch (\\Throwable \$e) { while (false) {} }", null],
+            'top-level function with closure and if' => ["<?php\nfunction bootstrap(array \$config) { \$factory = static function () use (\$config) { return \$config; }; if (\$config) { return \$factory(); } return null; }", null],
+            'closure returning an anonymous class' => ["<?php\nreturn new class { public function up(): void { \$now = time(); if (\$now > 0) { \$fn = fn () => \$now; } } };", null],
+            'routes file with static calls' => ["<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/', function () { return view('welcome'); });\nRoute::middleware(['auth'])->group(function () { Route::get('/home', fn () => 'home'); });", null],
+            'class declared after procedural code' => ["<?php\nnamespace Demo;\n\$boot = function () { return \$_ENV['x'] ?? null; };\nif (\$boot) { \$boot(); }\n" . $class, 'Demo\\Caller'],
+            'class declared before procedural code' => ["<?php\nnamespace Demo;" . $class . "\n\$caller = \$argc ? new Caller(new Service()) : null;\n\$caller?->go();", 'Demo\\Caller'],
+        ];
     }
 
     private function has(array $references, DependencyType $type, string $target): bool

@@ -791,6 +791,48 @@ PHP));
         $this->assertSame(7, $parser->calls);
     }
 
+    public function test_it_indexes_a_laravel_like_project_with_procedural_files(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-procedural-' . bin2hex(random_bytes(6));
+        mkdir($root . '/app/Services', 0777, true);
+        mkdir($root . '/routes');
+        mkdir($root . '/config');
+        mkdir($root . '/bootstrap');
+        mkdir($root . '/database/migrations', 0777, true);
+        $files = [
+            '/app/Services/PaymentService.php' => '<?php namespace App\Services; class PaymentService { public function charge(): void {} }',
+            '/app/Services/Checkout.php' => '<?php namespace App\Services; class Checkout { public function __construct(private PaymentService $payments) {} public function run(): void { $this->payments->charge(); } }',
+            '/routes/web.php' => "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/', function () { return 'home'; });\nRoute::middleware(['auth'])->group(function () { Route::get('/pay', fn () => 'pay'); });",
+            '/config/app.php' => "<?php\nreturn ['debug' => env('APP_DEBUG', false) ? true : false, 'url' => \$_ENV['APP_URL'] ?? 'http://localhost'];",
+            '/bootstrap/app.php' => "<?php\n\$app = new Illuminate\\Foundation\\Application(dirname(__DIR__));\nif (file_exists(__DIR__ . '/cache')) { \$app->useStoragePath(__DIR__); }\nreturn \$app;",
+            '/database/migrations/2026_01_01_000000_create_payments_table.php' => "<?php\nuse Illuminate\\Database\\Migrations\\Migration;\nreturn new class extends Migration { public function up(): void { if (true) { \$table = fn () => 'payments'; } } };",
+        ];
+        foreach ($files as $path => $code) {
+            file_put_contents($root . $path, $code);
+        }
+        set_error_handler(static function (int $severity, string $message, string $filename, int $line): bool {
+            throw new \ErrorException($message, 0, $severity, $filename, $line);
+        });
+
+        try {
+            $impact = $this->service()->impact($root, 'App\\Services\\PaymentService::charge');
+            $callers = $this->service()->findCallers($root, 'App\\Services\\PaymentService::charge');
+        } finally {
+            restore_error_handler();
+            foreach (array_keys($files) as $path) {
+                unlink($root . $path);
+            }
+            foreach (['/database/migrations', '/database', '/bootstrap', '/config', '/routes', '/app/Services', '/app', ''] as $directory) {
+                rmdir($root . $directory);
+            }
+        }
+
+        $this->assertSame('App\\Services\\PaymentService', $impact->data['target']);
+        $this->assertSame(1, $impact->data['direct_callers']);
+        $this->assertSame(['App\\Services\\Checkout'], array_column($callers->data['direct_callers'], 'source'));
+        $this->assertSame([], $impact->diagnostics);
+    }
+
     private function countingParser(): AstParser
     {
         return new class(new PhpAstParser()) implements AstParser {
