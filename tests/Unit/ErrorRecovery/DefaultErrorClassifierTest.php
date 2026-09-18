@@ -127,6 +127,11 @@ class DefaultErrorClassifierTest extends TestCase
         $this->assertEquals(ErrorType::SERVER_ERROR, $this->classifier->classify($error));
     }
 
+    public function test_it_stays_extendable_as_it_was_in_v0_3_0()
+    {
+        $this->assertFalse((new \ReflectionClass(DefaultErrorClassifier::class))->isFinal());
+    }
+
     private function providerExceptionWithStatus(int $status): ProviderException
     {
         $request = new Request('POST', 'https://api.openai.com/v1/chat/completions');

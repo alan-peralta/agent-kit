@@ -9,7 +9,7 @@ use Psr\Http\Client\NetworkExceptionInterface;
 use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
-final class DefaultErrorClassifier implements ErrorClassifier
+class DefaultErrorClassifier implements ErrorClassifier
 {
     public function classify(Throwable $error): ErrorType
     {
@@ -26,7 +26,7 @@ final class DefaultErrorClassifier implements ErrorClassifier
         }
 
         if ($previous instanceof RequestException) {
-            // Sem response = timeout de conexão ou erro de rede
+            // No response: a connection timeout or a network error.
             return ErrorType::NETWORK_TIMEOUT;
         }
 
