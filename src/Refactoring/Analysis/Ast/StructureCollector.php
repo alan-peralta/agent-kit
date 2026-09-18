@@ -848,10 +848,6 @@ final class StructureCollector extends NodeVisitorAbstract
         }
 
         $constant = $node->name instanceof Node\Identifier ? $node->name->toString() : null;
-        if ($node->class instanceof Node\Name && $constant !== null && strcasecmp($constant, 'class') === 0) {
-            return;
-        }
-
         $target = $node->class instanceof Node\Name ? $this->resolvedName($node->class) : null;
         $this->addReference(
             $target,
