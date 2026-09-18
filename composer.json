@@ -11,10 +11,10 @@
     ],
     "require": {
         "php": "^8.2",
-        "illuminate/contracts": "^10.0|^11.0|^12.0",
-        "illuminate/support": "^10.0|^11.0|^12.0",
-        "illuminate/database": "^10.0|^11.0|^12.0",
-        "illuminate/http": "^10.0|^11.0|^12.0",
+        "illuminate/contracts": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/database": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/http": "^10.0|^11.0|^12.0|^13.0",
         "guzzlehttp/guzzle": "^7.0"
     },
     "conflict": {
@@ -28,7 +28,7 @@
     "require-dev": {
         "mcp/sdk": "^0.8.1",
         "nikic/php-parser": "^5.8",
-        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
         "phpunit/phpunit": "^10.0|^11.0",
         "pgvector/pgvector": "^0.2",
         "react/http": "^1.11"

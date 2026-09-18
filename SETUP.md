@@ -4,7 +4,7 @@ Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (K
 
 ## ✅ Pré-requisitos
 
-- Laravel 10+ (suporta 10, 11, 12)
+- Laravel 10+ (suporta 10, 11, 12 e 13; o 13 exige PHP 8.3)
 - PHP 8.2+
 - PostgreSQL com extensão pgvector, ou MySQL/MariaDB com o store `database` ou Qdrant
 - Redis
@@ -27,6 +27,10 @@ php artisan vendor:publish --tag=agent-kit-pgvector-migrations
 
 > MySQL/MariaDB: troque a tag do pgvector por `agent-kit-database-store-migrations` para
 > usar o store `database`, ou não publique nenhuma tag de knowledge base se for usar Qdrant.
+
+> Laravel 13: um app novo vem com o Guzzle 8, e o Agent Kit ainda exige o Guzzle 7. Acrescente
+> `-W` ao `composer require` para o Composer rebaixar o Guzzle para 7.x, que o Laravel 13 também
+> aceita.
 
 > Refactoring Agent e servidor MCP: os comandos de AST (`refactor-analyze`, `-callers`,
 > `-dependencies` e `-impact`) e o `agent-kit:mcp` usam pacotes opcionais. Instale-os só em
@@ -96,7 +100,7 @@ AGENT_KIT_MCP_HTTP_ENABLED=false
 ## 🗄️ Passo 3: Rodar as migrations
 
 > ⚠️ Com a tag `agent-kit-pgvector-migrations` publicada, este passo exige o PostgreSQL com pgvector **já rodando e configurado** como a
-> conexão `pgsql` (ou a de `AGENT_KNOWLEDGE_DB`). Num app Laravel 11/12 novo, que vem
+> conexão `pgsql` (ou a de `AGENT_KNOWLEDGE_DB`). Num app Laravel 11, 12 ou 13 novo, que vem
 > com `DB_CONNECTION=sqlite`, o comando falha com
 > `SQLSTATE[HY000]: General error: 1 near "EXTENSION": syntax error`.
 > A verificação do Passo 4 acontece depois da migration — confirme o banco antes.
