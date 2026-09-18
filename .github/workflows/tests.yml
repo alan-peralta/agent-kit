@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   suite:
@@ -43,16 +43,19 @@ jobs:
             connection: mysql
             port: 3306
             health: mysqladmin ping -h 127.0.0.1 -uroot -pagentkit
+            phpunit_flags: ''
           - name: MariaDB 11.8
             image: mariadb:11.8
             connection: mariadb
             port: 3306
             health: healthcheck.sh --connect --innodb_initialized
+            phpunit_flags: ''
           - name: PostgreSQL 17 + pgvector
             image: pgvector/pgvector:pg17
             connection: pgsql
             port: 5432
             health: pg_isready -h 127.0.0.1 -U postgres
+            phpunit_flags: --fail-on-skipped
     services:
       database:
         image: ${{ matrix.image }}
@@ -90,4 +93,4 @@ jobs:
           AGENT_KIT_TEST_DB_DATABASE: agent_kit_test
           AGENT_KIT_TEST_DB_USERNAME: ${{ matrix.connection == 'pgsql' && 'postgres' || 'root' }}
           AGENT_KIT_TEST_DB_PASSWORD: agentkit
-        run: vendor/bin/phpunit --colors=never --no-coverage --group database
+        run: vendor/bin/phpunit --colors=never --no-coverage --group database ${{ matrix.phpunit_flags }}
