@@ -127,6 +127,22 @@ Local-scope frames carry `currentMethod` as a sixth element so closures and
 functions share the same push/pop code. `writtenVariablesIn()` stops at
 `Function_` nodes exactly as it stops at closures.
 
+### `ClassName::class` references
+
+`StructureCollector::collectClassConstant()` deliberately skipped
+`ClassName::class` (locked by
+`LaravelReferenceTest::test_dynamic_class_constant_references_preserve_every_known_fact`).
+Routes (`[UserController::class, 'index']`), config arrays
+(`'providers' => [X::class]`), listeners and Eloquent relations name their
+classes exactly this way, so without it the script symbols above would carry
+almost no edges. Amendment: `ClassName::class` is recorded everywhere as a
+`class_constant` reference with `confidence: exact` and
+`metadata: {"constant": "class"}`. Dynamic forms (`$class::class`) stay
+`unknown`. `app(X::class)` therefore yields both its `instantiation` edge and
+a `class_constant` edge on the same line; structural counts deduplicate by
+source, so risk levels only change where a class was previously invisible.
+The locked test is updated to expect the fourth reference.
+
 ### Capabilities
 
 `DefaultRefactoringCapabilities::analysisTarget()` keeps returning every
