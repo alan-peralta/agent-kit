@@ -394,7 +394,7 @@ PHP);
             $parsed->references,
             fn ($reference) => $reference->type === DependencyType::CLASS_CONSTANT,
         ));
-        $this->assertCount(3, $constants);
+        $this->assertCount(4, $constants);
         $this->assertNull($constants[0]->target);
         $this->assertSame(Confidence::UNKNOWN, $constants[0]->confidence);
         $this->assertSame(['constant' => 'VALUE'], $constants[0]->metadata);
@@ -404,6 +404,10 @@ PHP);
         $this->assertNull($constants[2]->target);
         $this->assertSame(Confidence::UNKNOWN, $constants[2]->confidence);
         $this->assertSame(['constant_name_confidence' => 'unknown'], $constants[2]->metadata);
+        $this->assertSame('Demo\\KnownClass', $constants[3]->target);
+        $this->assertSame(Confidence::EXACT, $constants[3]->confidence);
+        $this->assertSame(['constant' => 'class'], $constants[3]->metadata);
+        $this->assertSame(8, $constants[3]->line);
     }
 
     public function test_nullsafe_argument_and_dynamic_property_writes_do_not_leak_receiver_types(): void

@@ -607,16 +607,46 @@ PHP);
                 'direct_callers' => [],
                 'structural_dependencies' => [],
                 'transitive_impact' => [],
-                'risk' => 'UNKNOWN',
+                'risk' => 'LOW',
             ], $result->data);
 
+            $function = $this->service()->analyze($root, 'Standalone.php::helper');
+            $this->assertSame('Standalone.php', $function->data['target']);
+            $this->assertSame('helper', $function->data['method']);
+            $this->assertSame([], $function->data['upstream_dependencies']);
+            $this->assertSame('UNKNOWN', $function->data['risk']);
+            $this->assertSame([[
+                'file' => 'Standalone.php',
+                'line' => 3,
+                'message' => 'Calls to user-defined functions are not indexed; caller and impact results for Standalone.php::helper are incomplete.',
+            ]], $function->toArray()['diagnostics']);
+            $this->assertTrue($function->incomplete());
+        } finally {
+            if (is_file($file)) {
+                unlink($file);
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+        }
+    }
+
+    public function test_a_method_target_on_a_file_without_routines_is_unsupported(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-no-routines-' . bin2hex(random_bytes(6));
+        $file = $root . '/Config.php';
+
+        try {
+            $this->assertTrue(mkdir($root, 0777, true));
+            $this->assertNotFalse(file_put_contents($file, "<?php\n\nreturn ['debug' => false];\n"));
+
             try {
-                $this->service()->analyze($root, 'Standalone.php::helper');
+                $this->service()->analyze($root, 'Config.php::helper');
                 $this->fail('Expected an unsupported target error.');
             } catch (CapabilityException $exception) {
                 $this->assertSame('UNSUPPORTED_TARGET', $exception->errorCode);
                 $this->assertSame(
-                    'A method target requires a class declaration.',
+                    'A method target requires a class or top-level function declaration.',
                     $exception->getMessage(),
                 );
             }
@@ -794,6 +824,186 @@ PHP));
         $this->service($parser)->analyze($this->root, 'Fixtures\\Payments\\PaymentService');
 
         $this->assertSame(7, $parser->calls);
+    }
+
+    public function test_it_indexes_a_laravel_like_project_with_procedural_files(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-procedural-' . bin2hex(random_bytes(6));
+        mkdir($root . '/app/Services', 0777, true);
+        mkdir($root . '/routes');
+        mkdir($root . '/config');
+        mkdir($root . '/bootstrap');
+        mkdir($root . '/database/migrations', 0777, true);
+        $files = [
+            '/app/Services/PaymentService.php' => '<?php namespace App\Services; class PaymentService { public function charge(): void {} }',
+            '/app/Services/Checkout.php' => '<?php namespace App\Services; class Checkout { public function __construct(private PaymentService $payments) {} public function run(): void { $this->payments->charge(); } }',
+            '/routes/web.php' => "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/', function () { return 'home'; });\nRoute::middleware(['auth'])->group(function () { Route::get('/pay', fn () => 'pay'); });",
+            '/config/app.php' => "<?php\nreturn ['debug' => env('APP_DEBUG', false) ? true : false, 'url' => \$_ENV['APP_URL'] ?? 'http://localhost'];",
+            '/bootstrap/app.php' => "<?php\n\$app = new Illuminate\\Foundation\\Application(dirname(__DIR__));\nif (file_exists(__DIR__ . '/cache')) { \$app->useStoragePath(__DIR__); }\nreturn \$app;",
+            '/database/migrations/2026_01_01_000000_create_payments_table.php' => "<?php\nuse Illuminate\\Database\\Migrations\\Migration;\nreturn new class extends Migration { public function up(): void { if (true) { \$table = fn () => 'payments'; } } };",
+        ];
+        foreach ($files as $path => $code) {
+            file_put_contents($root . $path, $code);
+        }
+        set_error_handler(static function (int $severity, string $message, string $filename, int $line): bool {
+            throw new \ErrorException($message, 0, $severity, $filename, $line);
+        });
+
+        try {
+            $impact = $this->service()->impact($root, 'App\\Services\\PaymentService::charge');
+            $callers = $this->service()->findCallers($root, 'App\\Services\\PaymentService::charge');
+        } finally {
+            restore_error_handler();
+            foreach (array_keys($files) as $path) {
+                unlink($root . $path);
+            }
+            foreach (['/database/migrations', '/database', '/bootstrap', '/config', '/routes', '/app/Services', '/app', ''] as $directory) {
+                rmdir($root . $directory);
+            }
+        }
+
+        $this->assertSame('App\\Services\\PaymentService', $impact->data['target']);
+        $this->assertSame(1, $impact->data['direct_callers']);
+        $this->assertSame(['App\\Services\\Checkout'], array_column($callers->data['direct_callers'], 'source'));
+        $this->assertSame([], $impact->diagnostics);
+    }
+
+    public function test_an_analysis_failure_in_one_file_is_reported_as_an_envelope_diagnostic(): void
+    {
+        $parser = new class(new PhpAstParser()) implements AstParser {
+            public function __construct(private readonly AstParser $inner) {}
+
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                if (str_ends_with($file, 'LogsPayments.php')) {
+                    throw new \RuntimeException('boom');
+                }
+
+                return $this->inner->parse($file, $displayPath);
+            }
+        };
+
+        $result = $this->service($parser)->impact($this->root, 'Fixtures\\Payments\\PaymentService::charge');
+
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $result->data['target']);
+        $this->assertSame(
+            [['file' => 'LogsPayments.php', 'line' => 1, 'message' => 'Analysis failed: RuntimeException: boom']],
+            $result->toArray()['diagnostics'],
+        );
+        $this->assertTrue($result->incomplete());
+    }
+
+    public function test_scripts_are_reported_as_dependents_and_accepted_as_targets(): void
+    {
+        $this->withProject([
+            'app/Http/Controllers/UserController.php' => '<?php namespace App\Http\Controllers; use App\Services\UserMaker; class UserController { public function __construct(private UserMaker $maker) {} public function index(): void { $this->maker->make(); } }',
+            'app/Services/UserMaker.php' => '<?php namespace App\Services; class UserMaker { public function make(): void {} }',
+            'routes/web.php' => "<?php\nuse App\\Http\\Controllers\\UserController;\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/users', [UserController::class, 'index']);\nRoute::get('/make', function () { \$maker = app(\\App\\Services\\UserMaker::class); return \$maker->make(); });",
+            'app/helpers.php' => "<?php\nuse App\\Services\\UserMaker;\nif (!function_exists('make_user')) {\n    function make_user(UserMaker \$maker): void { \$maker->make(); }\n}",
+        ], function (string $root): void {
+            $callers = $this->service()->findCallers($root, 'App\\Services\\UserMaker::make');
+            $this->assertSame(
+                [['App\\Http\\Controllers\\UserController', 'index'], ['app/helpers.php', 'make_user'], ['routes/web.php', null]],
+                array_map(fn (array $edge) => [$edge['source'], $edge['source_method']], $callers->data['direct_callers']),
+            );
+            $this->assertSame([], $callers->diagnostics);
+
+            $impact = $this->service()->impact($root, 'App\\Services\\UserMaker');
+            $this->assertSame(3, $impact->data['direct_callers']);
+            $this->assertSame(3, $impact->data['affected_files']);
+
+            $dependencies = $this->service()->dependencies($root, 'routes/web.php');
+            $this->assertSame('routes/web.php', $dependencies->data['target']);
+            $this->assertContains('App\\Http\\Controllers\\UserController', array_column($dependencies->data['upstream_dependencies'], 'target'));
+            $this->assertSame([], $dependencies->data['downstream_dependents']);
+            $this->assertSame([], $dependencies->data['transitive_dependents']);
+
+            $routes = $this->service()->analyze($root, 'routes/web.php');
+            $this->assertSame('routes/web.php', $routes->data['target']);
+            $this->assertNull($routes->data['method']);
+            $this->assertContains('App\\Services\\UserMaker', array_column($routes->data['upstream_dependencies'], 'target'));
+
+            $function = $this->service()->analyze($root, 'app/helpers.php::make_user');
+            $this->assertSame('app/helpers.php', $function->data['target']);
+            $this->assertSame('make_user', $function->data['method']);
+            $this->assertSame('UNKNOWN', $function->data['risk']);
+            $this->assertTrue($function->incomplete());
+            $this->assertStringContainsString('app/helpers.php::make_user are incomplete', $function->toArray()['diagnostics'][0]['message']);
+
+            $functionCallers = $this->service()->findCallers($root, 'app/helpers.php::make_user');
+            $this->assertSame([], $functionCallers->data['direct_callers']);
+            $this->assertTrue($functionCallers->incomplete());
+            $this->assertSame(4, $functionCallers->toArray()['diagnostics'][0]['line']);
+
+            $functionImpact = $this->service()->impact($root, 'app/helpers.php::make_user');
+            $this->assertSame('UNKNOWN', $functionImpact->data['risk']);
+            $this->assertTrue($functionImpact->incomplete());
+        });
+    }
+
+    public function test_a_class_file_with_top_level_code_keeps_class_method_targets_unambiguous(): void
+    {
+        $this->withProject([
+            'app/Support/Clock.php' => "<?php\nnamespace App\\Support;\nclass Clock { public function now(): int { return time(); } }\nClock::class;",
+        ], function (string $root): void {
+            $result = $this->service()->analyze($root, 'app/Support/Clock.php::now');
+
+            $this->assertSame('app/Support/Clock.php', $result->data['target']);
+            $this->assertSame('now', $result->data['method']);
+
+            try {
+                $this->service()->analyze($root, 'app/Support/Clock.php::missing');
+                $this->fail('Expected TARGET_NOT_FOUND.');
+            } catch (CapabilityException $exception) {
+                $this->assertSame('TARGET_NOT_FOUND', $exception->errorCode);
+                $this->assertSame('Method not found: App\\Support\\Clock::missing', $exception->getMessage());
+            }
+        });
+    }
+
+    public function test_a_file_with_two_classes_and_script_code_stays_ambiguous_for_method_targets(): void
+    {
+        $this->withProject([
+            'app/Pair.php' => "<?php\nnamespace App;\nclass First { public function go(): void {} }\nclass Second { public function go(): void {} }\nFirst::class;",
+        ], function (string $root): void {
+            try {
+                $this->service()->analyze($root, 'app/Pair.php::go');
+                $this->fail('Expected an ambiguous target error.');
+            } catch (CapabilityException $exception) {
+                $this->assertSame('AMBIGUOUS_TARGET', $exception->errorCode);
+            }
+        });
+    }
+
+    /** @param array<string, string> $files root-relative path => contents */
+    private function withProject(array $files, callable $test): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-project-' . bin2hex(random_bytes(6));
+        foreach ($files as $path => $code) {
+            $directory = dirname($root . '/' . $path);
+            if (!is_dir($directory)) {
+                mkdir($directory, 0777, true);
+            }
+            file_put_contents($root . '/' . $path, $code);
+        }
+
+        try {
+            $test($root);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    private function removeDirectory(string $directory): void
+    {
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . '/' . $entry;
+            is_dir($path) ? $this->removeDirectory($path) : unlink($path);
+        }
+        rmdir($directory);
     }
 
     private function countingParser(): AstParser

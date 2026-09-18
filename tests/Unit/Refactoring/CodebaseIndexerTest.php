@@ -57,6 +57,70 @@ final class CodebaseIndexerTest extends TestCase
         rmdir($root);
     }
 
+    public function test_a_failing_file_becomes_a_diagnostic_and_indexing_continues(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-failure-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Broken.php', '<?php class Broken {}');
+        file_put_contents($root . '/Fine.php', '<?php class Fine {}');
+
+        $parser = new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                if (str_ends_with($file, 'Broken.php')) {
+                    throw new \TypeError('Cannot assign null to property StructureCollector::$localTypes of type array');
+                }
+
+                return new ParsedFile($displayPath ?? $file, [
+                    new SymbolDefinition('Fine', 'class', $displayPath ?? $file, 1),
+                ]);
+            }
+        };
+
+        try {
+            $index = (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), $parser))->build($root);
+        } finally {
+            unlink($root . '/Broken.php');
+            unlink($root . '/Fine.php');
+            rmdir($root);
+        }
+
+        $this->assertNotNull($index->findClass('Fine'));
+        $this->assertSame([[
+            'file' => 'Broken.php',
+            'line' => 1,
+            'message' => 'Analysis failed: TypeError: Cannot assign null to property StructureCollector::$localTypes of type array',
+        ]], array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics()));
+    }
+
+    public function test_analysis_failure_diagnostics_keep_only_basenames_of_absolute_paths(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-redact-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Broken.php', '<?php class Broken {}');
+
+        $parser = new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                throw new \RuntimeException(
+                    "Não foi possível ler {$file}, called in /opt/tool/src/StructureCollector.php on line 12 (C:\\tool\\Collector.php). Class App\\Services\\Foo stays.",
+                );
+            }
+        };
+
+        try {
+            $index = (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), $parser))->build($root);
+        } finally {
+            unlink($root . '/Broken.php');
+            rmdir($root);
+        }
+
+        $this->assertSame(
+            'Analysis failed: RuntimeException: Não foi possível ler Broken.php, called in StructureCollector.php on line 12 (Collector.php). Class App\\Services\\Foo stays.',
+            $index->diagnostics()[0]->message,
+        );
+    }
+
     public function test_it_indexes_real_declarations_and_reverse_references(): void
     {
         $root = dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast';
@@ -239,5 +303,44 @@ PHP);
             unlink($root . '/Second.php');
             rmdir($root);
         }
+    }
+
+    public function test_scripts_become_graph_nodes_and_edge_sources(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-scripts-' . bin2hex(random_bytes(6));
+        mkdir($root . '/app/Http/Controllers', 0777, true);
+        mkdir($root . '/routes');
+        $files = [
+            '/app/Http/Controllers/UserController.php' => '<?php namespace App\Http\Controllers; class UserController { public function index(): void {} }',
+            '/routes/web.php' => "<?php\nuse App\\Http\\Controllers\\UserController;\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/users', [UserController::class, 'index']);",
+            '/app/helpers.php' => "<?php\nuse App\\Http\\Controllers\\UserController;\nfunction user_controller(): UserController { return new UserController(); }",
+        ];
+        foreach ($files as $path => $code) {
+            file_put_contents($root . $path, $code);
+        }
+
+        try {
+            $index = (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), new PhpAstParser()))->build($root);
+        } finally {
+            foreach (array_keys($files) as $path) {
+                unlink($root . $path);
+            }
+            foreach (['/routes', '/app/Http/Controllers', '/app/Http', '/app', ''] as $directory) {
+                rmdir($root . $directory);
+            }
+        }
+
+        $this->assertSame([], $index->diagnostics());
+        $this->assertSame('script', $index->findClass('routes/web.php')->kind);
+        $this->assertSame('script', $index->graph()->node('routes/web.php')->kind);
+        $this->assertSame(1, $index->graph()->node('app/helpers.php')->line);
+        $this->assertSame('user_controller', $index->findMethod('app/helpers.php', 'user_controller')['name']);
+        $this->assertSame(['app/helpers.php'], array_map(fn ($symbol) => $symbol->fqcn, $index->classesInFile('app/helpers.php')));
+        $this->assertSame(
+            ['app/helpers.php', 'routes/web.php'],
+            array_values(array_unique(array_map(fn ($edge) => $edge->source, $index->findReferencesTo('App\\Http\\Controllers\\UserController')))),
+        );
+        $this->assertSame([], $index->findReferencesTo('routes/web.php'));
+        $this->assertNotEmpty($index->findDependencies('routes/web.php'));
     }
 }
