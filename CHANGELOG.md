@@ -7,6 +7,10 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não Lançado]
 
+## [0.4.0] - 2026-09-18
+
+_Atualizando da v0.3.x: veja a seção "Atualizando" do [README](README.md#atualizando). Esta versão tem mudanças **BREAKING** para quem usa o servidor MCP, os comandos de AST do Refactoring Agent ou o transporte HTTP do MCP._
+
 ### Adicionado
 - Suporte ao Laravel 13 (`illuminate/*` `^13.0`; o Laravel 13 exige PHP 8.3). O CI passa a rodar a suíte também no Laravel 13, com todas as dependências na versão mais nova que o `composer.json` permite.
 - Suporte ao Guzzle 8 (`guzzlehttp/guzzle: ^7.0|^8.0`): um app Laravel 13 novo, que já vem com o Guzzle 8, instala o Agent Kit sem precisar de `-W`. O lock de testes continua no Guzzle 7 (Laravel 12); o CI passa a rodar a suíte também com o Guzzle 8 forçado (`Suite (Laravel 13, Guzzle 8)`).
@@ -100,7 +104,8 @@ _Atualizando da v0.1.0: veja a seção "Atualizando" do [README](README.md#atual
 - Especificações de design e planos de implementação para o sistema de recuperação de erros, analytics/monitoramento e melhorias na suíte de testes unitários.
 - Documentação da configuração e comportamento de recuperação de erros, e da configuração/eventos de analytics.
 
-[Não Lançado]: https://github.com/alan-peralta/agent-kit/compare/v0.3.0...HEAD
+[Não Lançado]: https://github.com/alan-peralta/agent-kit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alan-peralta/agent-kit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alan-peralta/agent-kit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alan-peralta/agent-kit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/alan-peralta/agent-kit/releases/tag/v0.1.0
