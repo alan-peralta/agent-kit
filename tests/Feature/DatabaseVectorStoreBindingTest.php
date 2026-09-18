@@ -31,4 +31,21 @@ class DatabaseVectorStoreBindingTest extends TestCase
         $this->assertInstanceOf(DatabaseVectorStore::class, $store);
         $this->assertSame(1, DB::connection('testing')->table('kb_custom')->count());
     }
+
+    public function test_it_falls_back_to_the_defaults_when_a_published_config_lacks_the_database_store(): void
+    {
+        config()->set('agent-kit.knowledge.store', 'database');
+        config()->set('agent-kit.knowledge.stores', [
+            'pgvector' => ['driver' => 'pgvector', 'connection' => 'pgsql', 'table' => 'knowledge_chunks'],
+        ]);
+        foreach (PackageMigrations::in('database/knowledge/database') as $migration) {
+            $migration->up();
+        }
+
+        $store = $this->app->make(KnowledgeStore::class);
+        $store->insert(new KnowledgeChunk('tenant', 'faq', 'source', 'content', [], [1.0, 0.0]));
+
+        $this->assertInstanceOf(DatabaseVectorStore::class, $store);
+        $this->assertSame(1, DB::table('knowledge_chunks')->count());
+    }
 }

@@ -200,6 +200,10 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->app->bind(KnowledgeStore::class, function ($app) {
             $name = config('agent-kit.knowledge.store', 'pgvector');
             $cfg = config("agent-kit.knowledge.stores.{$name}");
+            if (!$cfg && $name === 'database') {
+                // Configs published before this store existed have no entry for it; its defaults need none.
+                $cfg = ['driver' => 'database'];
+            }
             if (!$cfg) {
                 throw new \RuntimeException("Knowledge store '{$name}' não configurado.");
             }
