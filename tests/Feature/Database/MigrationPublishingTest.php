@@ -14,6 +14,7 @@ class MigrationPublishingTest extends TestCase
     private const TAGS = [
         'agent-kit-migrations' => 'database/migrations',
         'agent-kit-pgvector-migrations' => 'database/knowledge/pgvector',
+        'agent-kit-database-store-migrations' => 'database/knowledge/database',
     ];
 
     public function test_each_migration_tag_publishes_one_package_directory_into_the_app_migrations(): void

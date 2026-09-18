@@ -156,6 +156,7 @@ return [
             ],
         ],
 
+        // Opções: pgvector (PostgreSQL + pgvector), qdrant, database (qualquer banco do Laravel)
         'store' => env('AGENT_KNOWLEDGE_STORE', 'pgvector'),
 
         'stores' => [
@@ -171,6 +172,14 @@ return [
                 'collection' => env('QDRANT_COLLECTION', 'knowledge_chunks'),
                 'timeout' => (float) env('QDRANT_TIMEOUT', 30),
                 'batch_size' => (int) env('QDRANT_BATCH_SIZE', 100),
+            ],
+            'database' => [
+                'driver' => 'database',
+                // null = conexão padrão da aplicação (MySQL, MariaDB, PostgreSQL ou SQLite).
+                // Os embeddings ficam numa tabela comum e são ranqueados em PHP: indicado para
+                // bases de até alguns milhares de chunks por tenant e coleção.
+                'connection' => env('AGENT_KNOWLEDGE_DB'),
+                'table' => 'knowledge_chunks',
             ],
         ],
 

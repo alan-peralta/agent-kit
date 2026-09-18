@@ -104,6 +104,10 @@ class AgentKitServiceProvider extends ServiceProvider
                 __DIR__ . '/../database/knowledge/pgvector' => database_path('migrations'),
             ], 'agent-kit-pgvector-migrations');
 
+            $this->publishes([
+                __DIR__ . '/../database/knowledge/database' => database_path('migrations'),
+            ], 'agent-kit-database-store-migrations');
+
             $this->commands([
                 InstallAgentsCommand::class,
                 RefactorAuditCommand::class,
