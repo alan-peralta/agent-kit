@@ -58,10 +58,16 @@ Command options: `--transport=stdio|http`, `--path=`, `--host=`, `--port=`,
 | `refactoring_dependencies` | `dependencies(root, target)` | `target` | upstream, downstream and transitive dependencies |
 | `refactoring_impact` | `impact(root, target)` | `target` | dependent counts, risk, affected files, records |
 
-`target` is a project-relative or absolute in-project PHP file (analyze only),
-a fully qualified class, or `Class::method` where the capability supports
-method scope. Every tool is annotated `readOnlyHint: true`,
+`target` is a project-relative or absolute in-project PHP file, a fully qualified
+class, or `Class::method` where the capability supports method scope. A script path
+(`routes/web.php`) is accepted by every tool that accepts a class, and
+`file.php::function` is accepted where method scope is supported; function targets
+answer with `risk: UNKNOWN` plus a diagnostic, because calls to user-defined
+functions are not indexed. Every tool is annotated `readOnlyHint: true`,
 `destructiveHint: false`. There is no `refactoring_apply`; `ANALYZE != MODIFY`.
+
+`targets` in `refactoring_capabilities` lists the primary target kinds; script
+paths ride on the `class` form.
 
 ### Result envelope
 

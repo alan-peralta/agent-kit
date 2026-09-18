@@ -16,7 +16,7 @@ final class McpServerFactory
 
     private const INSTRUCTIONS = <<<'TEXT'
 Agent Kit deterministic refactoring analysis for PHP/Laravel. ANALYZE != MODIFY: every tool is read-only and operates on the project root fixed when this server started; there is no apply, edit or shell tool.
-Use refactoring_capabilities (or the agent-kit://refactoring/capabilities resource) to discover tools. Targets are project-relative PHP files (analyze only), fully qualified class names, or Class::method.
+Use refactoring_capabilities (or the agent-kit://refactoring/capabilities resource) to discover tools. Targets are project-relative PHP files (refactoring_analyze), fully qualified class names, script paths such as routes/web.php wherever a class is accepted, or Class::method / file.php::function where method scope is supported; function targets return risk UNKNOWN with a diagnostic because calls to user-defined functions are not indexed.
 Results carry structuredContent with schema_version, capability, incomplete, data, diagnostics and unresolved. incomplete=true means static analysis could not resolve everything: read diagnostics (parse problems) and unresolved (dynamic references) instead of guessing. Domain failures come back as tool errors (isError=true) with {schema_version, error: {code, message}}.
 Dependency never proves breakage; report impact as "potentially affected" and verify with tests.
 TEXT;

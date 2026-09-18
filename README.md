@@ -9,12 +9,38 @@ Toolkit Laravel para construir agentes de IA com suporte a múltiplos providers 
 
 ## Instalação
 
+> O pacote ainda não está publicado no Packagist. Registre o repositório Git
+> antes de instalar.
+
+**Pré-requisito:** `php artisan migrate` executa `CREATE EXTENSION IF NOT EXISTS vector`
+na conexão `pgsql` (ou na conexão apontada por `AGENT_KNOWLEDGE_DB`). Antes de rodar
+o comando, tenha um PostgreSQL com a extensão pgvector disponível e já configurado em
+`config/database.php`. Isso vale inclusive para quem só usa tools/conversas ou pretende
+usar Qdrant: hoje a migration do `knowledge_chunks` é publicada e executada junto com
+as demais, sem tag própria.
+
 ```bash
-composer require peralta/agent-kit
+composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent-kit
+composer require peralta/agent-kit:^0.2
 php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
 ```
+
+Alternativa mais curta para um checkout local do pacote:
+
+```bash
+composer config repositories.agent-kit path ../agent-kit
+composer require peralta/agent-kit:@dev
+```
+
+## Atualizando
+
+Vindo da v0.1.0: `composer update peralta/agent-kit`, depois
+`php artisan vendor:publish --tag=agent-kit-config --force` para trazer as novas
+seções `refactoring` e `mcp` (ou deixe o merge automático de config resolver, se você
+não usa `config:cache`). Se usa cache de config, rode `php artisan config:clear`.
+Nenhuma migration nova é necessária. Veja [CHANGELOG.md](CHANGELOG.md).
 
 ## Configuração
 
@@ -29,7 +55,7 @@ GEMINI_API_KEY=...
 DEEPSEEK_API_KEY=...
 
 AGENT_CONVERSATION_DRIVER=database
-AGENT_KNOWLEDGE_DB=pgsql_knowledge
+AGENT_KNOWLEDGE_DB=pgsql
 ```
 
 Veja [`.env.example`](.env.example) para a lista completa de variáveis, incluindo
@@ -264,6 +290,7 @@ Eventos disparados:
 O Agent Kit inclui um auditor inicial de refatoração para PHP/Laravel. Ele coleta sinais determinísticos do codebase para que agentes de coding possam raciocinar com dados objetivos antes de propor mudanças.
 
 ```bash
+php artisan agent-kit:refactor-capabilities --json
 php artisan agent-kit:refactor-audit
 php artisan agent-kit:refactor-audit /path/to/project
 php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
@@ -292,10 +319,27 @@ php artisan agent-kit:agents:install claude --path=/project
 php artisan agent-kit:agents:install --all --path=/project
 ```
 
+As skills geradas usam duas fontes: as tools MCP e, como fallback, os comandos
+`php artisan agent-kit:refactor-* --json` executados **dentro** de `/project`.
+Esse fallback só funciona se `/project` também tiver o `peralta/agent-kit`
+instalado (veja [Instalação](#instalação)). Se não tiver, mantenha o servidor MCP
+rodando com `--path=/project` — ele é a única fonte de dados nesse caso.
+
 `--path=/project` precisa apontar para um diretório existente; um valor vazio é
 rejeitado. Use agentes posicionais (`cursor`, `claude`) ou `--all`, nunca ambos.
 Arquivos personalizados em conflito são preservados, exceto quando `--force` é
 fornecido explicitamente.
+
+A instalação grava, por agente:
+
+```text
+.claude/skills/refactor-{audit,analyze,callers,dependencies,impact,plan}/SKILL.md
+.claude/rules/agent-kit-refactoring.md
+.cursor/skills/refactor-{audit,analyze,callers,dependencies,impact,plan}/SKILL.md
+.cursor/rules/agent-kit-refactoring.mdc
+```
+
+Comite esses arquivos se toda a equipe deve compartilhar o mesmo workflow.
 
 Cursor e Claude Code recebem os mesmos seis comandos portáveis:
 
@@ -310,9 +354,10 @@ Cursor e Claude Code recebem os mesmos seis comandos portáveis:
 
 Exemplo: `/refactor-impact App\Services\PaymentService::charge`.
 
-As skills tentam obter fatos na ordem: tools MCP do Agent Kit (`refactoring_audit`,
-`refactoring_analyze`, `refactoring_callers`, `refactoring_dependencies`,
-`refactoring_impact`), CLI `agent-kit:refactor-* --json`, leitura/pesquisa no
+As skills tentam obter fatos na ordem: tools MCP do Agent Kit
+(`refactoring_capabilities`, `refactoring_audit`, `refactoring_analyze`,
+`refactoring_callers`, `refactoring_dependencies`, `refactoring_impact`),
+CLI `agent-kit:refactor-* --json`, leitura/pesquisa no
 repositório e, por último, interpretação do LLM. Elas separam `FACTS`,
 `INTERPRETATION` e `RECOMMENDATIONS`, sinalizam comportamento dinâmico não
 resolvido e mantêm `ANALYZE != MODIFY`.
@@ -320,7 +365,8 @@ resolvido e mantêm `ANALYZE != MODIFY`.
 O Refactoring Core é compartilhado pela CLI, pelos coding agents e pelo servidor
 MCP. No `/refactor-plan`, a saída é somente um plano. No `/refactor-audit` e nos
 demais comandos, a saída é somente análise. Nenhum comando aplica mudanças
-automaticamente. No `/refactor-apply` command is generated.
+automaticamente. Nenhum comando `/refactor-apply` é gerado e a tool
+`refactoring_apply` não existe.
 
 ```text
                Refactoring Core
@@ -349,3 +395,20 @@ Configuração em `config/agent-kit.php` (`mcp`) e variáveis `AGENT_KIT_MCP_*`
 no `.env.example`. Veja [MCP_SERVER.md](MCP_SERVER.md) para transporte,
 autenticação, origins permitidas, cache do índice, exemplos por cliente,
 diagnóstico e limitações.
+
+## Documentação
+
+- [SETUP.md](SETUP.md) — guia completo de configuração (PostgreSQL + pgvector, Redis, RAG)
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Redis vs Database vs Knowledge Base, e o Refactoring Core
+- [REFACTORING_AGENT.md](REFACTORING_AGENT.md) — Refactoring Agent: comandos, análise AST, workflow
+- [MCP_SERVER.md](MCP_SERVER.md) — servidor MCP: transportes, segurança, clientes
+- [EMBEDDERS.md](EMBEDDERS.md) e [HYBRID_STORAGE.md](HYBRID_STORAGE.md) — embedders e storage híbrido
+- [CHANGELOG.md](CHANGELOG.md) — histórico de versões
+
+## Contribuindo
+
+Veja [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licença
+
+MIT. Veja [LICENSE](LICENSE).

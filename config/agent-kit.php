@@ -297,8 +297,8 @@ return [
     'logging' => [
         'enabled' => env('AGENT_LOGGING', true),
         'channel' => env('AGENT_LOG_CHANNEL', 'stack'),
-        'log_tool_calls' => true,
-        'log_messages' => false, // cuidado com PII
+        'log_tool_calls' => env('AGENT_LOG_TOOL_CALLS', true),
+        'log_messages' => env('AGENT_LOG_MESSAGES', false), // cuidado com PII
     ],
 
     /*

@@ -24,7 +24,7 @@ final class CapabilitiesResourceHandlerTest extends TestCase
         $impact = $document['tools'][5];
         self::assertSame('impact', $impact['capability']);
         self::assertSame(['class', 'method'], $impact['targets']);
-        self::assertSame('php artisan agent-kit:refactor-impact <class> --method=<method> --json', $impact['cli_fallback']);
+        self::assertSame('php artisan agent-kit:refactor-impact "<class>[::<method>]" --json', $impact['cli_fallback']);
         self::assertSame($catalog->tool('refactoring_impact')->inputSchema, $impact['input_schema']);
         self::assertSame($catalog->tool('refactoring_impact')->outputSchema, $impact['output_schema']);
 
