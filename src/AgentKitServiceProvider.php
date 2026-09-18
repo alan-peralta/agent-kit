@@ -33,6 +33,7 @@ use Peralta\AgentKit\Knowledge\Embedders\GeminiEmbedder;
 use Peralta\AgentKit\Knowledge\Embedders\MistralEmbedder;
 use Peralta\AgentKit\Knowledge\Embedders\OpenAIEmbedder;
 use Peralta\AgentKit\Knowledge\KnowledgeIndexer;
+use Peralta\AgentKit\Knowledge\Stores\DatabaseVectorStore;
 use Peralta\AgentKit\Knowledge\Stores\PgvectorStore;
 use Peralta\AgentKit\Knowledge\Stores\QdrantStore;
 use Peralta\AgentKit\Providers\AnthropicProvider;
@@ -214,6 +215,10 @@ class AgentKitServiceProvider extends ServiceProvider
                     collection: $cfg['collection'] ?? 'knowledge_chunks',
                     timeout: (float) ($cfg['timeout'] ?? 30),
                     batchSize: (int) ($cfg['batch_size'] ?? 100),
+                ),
+                'database' => new DatabaseVectorStore(
+                    connection: $cfg['connection'] ?? null,
+                    table: $cfg['table'] ?? 'knowledge_chunks',
                 ),
                 default => throw new \RuntimeException("Driver de knowledge store '{$cfg['driver']}' inválido."),
             };
