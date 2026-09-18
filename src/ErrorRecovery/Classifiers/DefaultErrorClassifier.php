@@ -2,24 +2,27 @@
 
 namespace Peralta\AgentKit\ErrorRecovery\Classifiers;
 
-use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
 use Peralta\AgentKit\ErrorRecovery\Contracts\ErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Enums\ErrorType;
+use Psr\Http\Client\NetworkExceptionInterface;
+use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
-class DefaultErrorClassifier implements ErrorClassifier
+final class DefaultErrorClassifier implements ErrorClassifier
 {
     public function classify(Throwable $error): ErrorType
     {
         $previous = $error->getPrevious();
 
-        if ($previous instanceof ConnectException) {
+        // Guzzle 7's ConnectException and Guzzle 8's NetworkException family: no response arrived.
+        if ($previous instanceof NetworkExceptionInterface) {
             return ErrorType::NETWORK_TIMEOUT;
         }
 
-        if ($previous instanceof RequestException && $previous->hasResponse()) {
-            return $this->classifyStatusCode($previous->getResponse()->getStatusCode());
+        $response = $previous === null ? null : $this->responseOf($previous);
+        if ($response !== null) {
+            return $this->classifyStatusCode($response->getStatusCode());
         }
 
         if ($previous instanceof RequestException) {
@@ -28,6 +31,25 @@ class DefaultErrorClassifier implements ErrorClassifier
         }
 
         return ErrorType::SERVER_ERROR;
+    }
+
+    /**
+     * Guzzle 7 exposes the response on RequestException (null when there is none) and Guzzle 8
+     * only on ResponseException, so ask the exception itself instead of naming either class.
+     */
+    private function responseOf(Throwable $exception): ?ResponseInterface
+    {
+        if (!method_exists($exception, 'getResponse')) {
+            return null;
+        }
+
+        try {
+            $response = $exception->getResponse();
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $response instanceof ResponseInterface ? $response : null;
     }
 
     private function classifyStatusCode(int $status): ErrorType
