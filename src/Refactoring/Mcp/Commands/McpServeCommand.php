@@ -3,6 +3,8 @@
 namespace Peralta\AgentKit\Refactoring\Mcp\Commands;
 
 use Illuminate\Console\Command;
+use Mcp\Server;
+use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Mcp\McpConfigurationException;
 use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
@@ -35,6 +37,11 @@ final class McpServeCommand extends Command
         $transport = strtolower((string) ($this->option('transport') ?: ($config['transport'] ?? 'stdio')));
 
         try {
+            // mcp/sdk is only suggested: say what to install instead of failing deep inside the SDK.
+            if (!class_exists(Server::class)) {
+                throw MissingDependencyException::forFeature('The MCP server', 'mcp/sdk');
+            }
+
             $root = McpProjectRoot::fromPath((string) ($this->option('path') ?: ($config['project_root'] ?: base_path())));
             $logger = $loggers->create((array) ($config['logging'] ?? []));
 
@@ -43,7 +50,7 @@ final class McpServeCommand extends Command
                 'http' => $http->listen($this->httpOptions((array) ($config['http'] ?? [])), $root, $logger),
                 default => $this->refuse("Unsupported MCP transport: {$transport}. Use stdio or http."),
             };
-        } catch (McpConfigurationException $exception) {
+        } catch (McpConfigurationException|MissingDependencyException $exception) {
             return $this->refuse($exception->getMessage());
         }
     }
