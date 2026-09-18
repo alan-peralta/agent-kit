@@ -18,7 +18,7 @@ are identical.
 
 ## Prerequisites
 
-- PHP 8.2+; Laravel 10, 11 or 12 with Agent Kit installed.
+- PHP 8.2+ (8.3+ on Laravel 13); Laravel 10, 11, 12 or 13 with Agent Kit installed.
 - `mcp/sdk` and `nikic/php-parser`, which Agent Kit only suggests. Install them
   in development: `composer require --dev mcp/sdk nikic/php-parser`. The SDK
   needs `ext-fileinfo`, and Agent Kit's `conflict` rule keeps it on `^0.8.1`

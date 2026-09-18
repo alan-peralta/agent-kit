@@ -13,7 +13,7 @@ Ao propor mudanças, avalie se o comportamento pertence à infraestrutura (pacot
 
 - PHP ^8.2
 - Composer
-- Laravel 10, 11 ou 12 (via `orchestra/testbench` para os testes)
+- Laravel 10, 11, 12 ou 13 (via `orchestra/testbench` para os testes; o lock usa o 12)
 - Extensão `pdo_sqlite` habilitada (usada na suíte de testes)
 - Opcional: `pdo_mysql` e `pdo_pgsql`, para rodar os testes de banco contra MySQL, MariaDB ou PostgreSQL
 
@@ -37,6 +37,18 @@ Para relatório de cobertura:
 
 ```bash
 vendor/bin/phpunit --coverage-text
+```
+
+### Contra o Laravel 13
+
+O lock fixa o Laravel 12. O CI também roda a suíte com todas as dependências na versão
+mais nova que o `composer.json` permite, no Laravel 13, que exige PHP 8.3. Para
+reproduzir localmente sem commitar o lock:
+
+```bash
+composer update --with laravel/framework:^13.0 --with orchestra/testbench:^11.0
+vendor/bin/phpunit
+git checkout composer.lock && composer install
 ```
 
 ### Contra MySQL, MariaDB ou PostgreSQL

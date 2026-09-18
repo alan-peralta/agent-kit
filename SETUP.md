@@ -4,7 +4,7 @@ Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (K
 
 ## ✅ Pré-requisitos
 
-- Laravel 10+ (suporta 10, 11, 12)
+- Laravel 10+ (suporta 10, 11, 12 e 13; o 13 exige PHP 8.3)
 - PHP 8.2+
 - PostgreSQL com extensão pgvector, ou MySQL/MariaDB com o store `database` ou Qdrant
 - Redis
