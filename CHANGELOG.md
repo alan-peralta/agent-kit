@@ -27,7 +27,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Correção de cabeçalho removido incorretamente e bugs de teste no `QdrantStore`.
 - Guarda no despacho de eventos contra falhas de listeners, aplicando `analytics.enabled` de forma consistente.
 - Carregamento apenas da migration `agent_kit_metrics` nos testes, em vez do diretório completo.
-- `StructureCollector` não quebra mais em código PHP fora de classes nomeadas (closures, `if`, ternários, `??`, `match` no topo do arquivo, funções globais e corpos de classes anônimas): `leaveNode()` passa a espelhar a guarda de `enterNode()`, evitando o esvaziamento das pilhas de escopo que fazia `refactor-analyze`/`callers`/`dependencies`/`impact` falharem em qualquer app Laravel real (`routes/*.php`, `bootstrap/app.php`, migrations). Arquivos sem classe nomeada continuam não contribuindo símbolos nem referências ao índice (comportamento pré-existente).
+- `StructureCollector` não quebra mais em código PHP fora de classes nomeadas (closures, `if`, ternários, `??`, `match` no topo do arquivo, funções globais e corpos de classes anônimas): `leaveNode()` passa a espelhar a guarda de `enterNode()`, evitando o esvaziamento das pilhas de escopo que fazia `refactor-analyze`/`callers`/`dependencies`/`impact` falharem em qualquer app Laravel real (`routes/*.php`, `bootstrap/app.php`, migrations).
 - `CodebaseIndexer` converte falhas de leitura ou de análise de um único arquivo em diagnóstico (`Analysis failed: …`) em vez de abortar o índice inteiro.
 - Funções nomeadas declaradas dentro de métodos ganham escopo local próprio e deixam de sobrescrever os tipos locais do método que as declara.
 
@@ -36,7 +36,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Limpeza da resolução e nomenclatura de providers em `Agent::send()`.
 - Substituição de chamadas diretas a `Log` por eventos e listeners de log.
 - Extração de helper compartilhado do Guzzle `MockHandler` para uma trait usada pelos testes de providers.
-- `ClassName::class` passa a gerar aresta `class_constant` (`metadata.constant = "class"`) e corpos de classes anônimas passam a contribuir referências atribuídas à rotina que os declara; como scripts agora contam como dependentes em `refactor-impact`/`refactor-callers`, o risco de classes referenciadas por rotas, config e migrations pode subir.
+- `ClassName::class` passa a gerar aresta `class_constant` (`metadata.constant = "class"`) e corpos de classes anônimas passam a contribuir referências atribuídas à rotina que os declara; como scripts agora contam como dependentes em `refactor-impact`/`refactor-callers`, o risco de classes referenciadas por rotas, config e migrations pode subir. `self::class`/`static::class` dentro da própria classe geram auto-arestas `class_constant` (mesma categoria de `self::CONST` e `$this->m()`), o que pode contar a classe como um dependente estrutural de si mesma. Alvos de função (`helpers.php::make_user`) respondem com `risk: UNKNOWN` e um diagnóstico, porque chamadas a funções não são indexadas; atributos de funções top-level geram arestas `attribute`.
 
 ### Documentação
 - Especificações de design e planos de implementação para o sistema de recuperação de erros, analytics/monitoramento e melhorias na suíte de testes unitários.

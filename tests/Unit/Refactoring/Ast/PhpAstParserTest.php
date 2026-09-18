@@ -364,6 +364,7 @@ if (!function_exists('make_user')) {
         return $user;
     }
 }
+#[App\Attributes\Handler]
 function plain(): void { new UserMaker(); }
 PHP);
 
@@ -384,6 +385,7 @@ PHP);
         $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'make_user', DependencyType::METHOD_CALL, 'App\\Services\\UserMaker'));
         $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'plain', DependencyType::INSTANTIATION, 'App\\Services\\UserMaker'));
         $this->assertFalse($this->hasFromMethod($parsed->references, 'app/helpers.php', null, DependencyType::INSTANTIATION, 'App\\Services\\UserMaker'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'plain', DependencyType::ATTRIBUTE, 'App\\Attributes\\Handler'));
     }
 
     public function test_script_locals_survive_a_top_level_function_declaration(): void
@@ -427,6 +429,92 @@ PHP);
         $missing = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::METHOD_CALL && $reference->target === null));
         $this->assertCount(1, $missing);
         $this->assertSame(7, $missing[0]->line);
+    }
+
+    public function test_dynamic_class_expressions_stay_unknown_and_self_class_is_a_self_edge(): void
+    {
+        $parsed = $this->parseCode('Registry.php', <<<'PHP'
+<?php
+namespace Demo;
+class Registry {
+    public function run(string $class): array { return [$class::class, self::class, static::class]; }
+}
+PHP);
+
+        $constants = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::CLASS_CONSTANT));
+        $this->assertSame([null, 'Demo\\Registry', 'Demo\\Registry'], array_map(fn ($reference) => $reference->target, $constants));
+        $this->assertSame([Confidence::UNKNOWN, Confidence::EXACT, Confidence::EXACT], array_map(fn ($reference) => $reference->confidence, $constants));
+        $this->assertSame([['constant' => 'class'], ['constant' => 'class'], ['constant' => 'class']], array_map(fn ($reference) => $reference->metadata, $constants));
+    }
+
+    public function test_named_classes_declared_inside_functions_and_branches_keep_their_own_attribution(): void
+    {
+        $parsed = $this->parseCode('conditional.php', <<<'PHP'
+<?php
+namespace Demo;
+function boot(Service $service): void {
+    class Inner { public function go(Service $service): void { $service->run(); } }
+    $service->run();
+}
+if (!class_exists(Branch::class)) {
+    class Branch { public function go(Service $service): void { $service->run(); } }
+}
+$fallback = new Service();
+$fallback->run();
+PHP);
+
+        $this->assertSame(['Demo\\Inner', 'Demo\\Branch', 'conditional.php'], array_map(fn ($symbol) => $symbol->fqcn, $parsed->symbols));
+        $this->assertSame(['boot'], array_column($parsed->symbols[2]->methods, 'name'));
+        $calls = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::METHOD_CALL));
+        $this->assertSame(
+            [['Demo\\Inner', 'go'], ['conditional.php', 'boot'], ['Demo\\Branch', 'go'], ['conditional.php', null]],
+            array_map(fn ($reference) => [$reference->source, $reference->sourceMethod], $calls),
+        );
+        $this->assertSame(array_fill(0, 4, 'Demo\\Service'), array_map(fn ($reference) => $reference->target, $calls));
+    }
+
+    public function test_functions_nested_in_closures_are_attributed_to_the_declaring_routine(): void
+    {
+        $parsed = $this->parseCode('Closure.php', <<<'PHP'
+<?php
+namespace Demo;
+class Host {
+    public function boot(): void {
+        $register = function (Service $service): void {
+            function nested(Other $other): void { $other->run(); }
+            $service->run();
+        };
+    }
+}
+PHP);
+
+        $this->assertCount(1, $parsed->symbols);
+        $calls = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::METHOD_CALL));
+        $this->assertSame(
+            [['Demo\\Host', 'boot', 'Demo\\Other'], ['Demo\\Host', 'boot', 'Demo\\Service']],
+            array_map(fn ($reference) => [$reference->source, $reference->sourceMethod, $reference->target], $calls),
+        );
+    }
+
+    public function test_top_level_functions_after_classes_are_still_registered(): void
+    {
+        $parsed = $this->parseCode('after.php', <<<'PHP'
+<?php
+namespace Demo;
+$listener = new class { public function handle(Service $service): void { $service->run(); } };
+class Plain { public function go(Service $service): void { $service->run(); } }
+function later(Service $service): void { $service->run(); }
+$service = new Service();
+$service->run();
+PHP);
+
+        $this->assertSame(['Demo\\Plain', 'after.php'], array_map(fn ($symbol) => $symbol->fqcn, $parsed->symbols));
+        $this->assertSame(['later'], array_column($parsed->symbols[1]->methods, 'name'));
+        $calls = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::METHOD_CALL));
+        $this->assertSame(
+            [['after.php', null], ['Demo\\Plain', 'go'], ['after.php', 'later'], ['after.php', null]],
+            array_map(fn ($reference) => [$reference->source, $reference->sourceMethod], $calls),
+        );
     }
 
     private function has(array $references, DependencyType $type, string $target): bool

@@ -157,7 +157,14 @@ References are attributed to the routine that declares the code:
 
 Top-level functions are listed in the script's `methods` with the same shape
 as class methods, so `helpers.php::make_user` is a valid `refactor-analyze`
-target. Scripts appear as dependents in `refactor-callers`,
+target.
+
+Because calls to user-defined functions are not tracked, function targets
+always report `risk: UNKNOWN` together with a diagnostic (`Calls to
+user-defined functions are not indexed; …`), so `incomplete` is `true` for
+them. Attributes on top-level functions produce `attribute` edges.
+
+Scripts appear as dependents in `refactor-callers`,
 `refactor-impact` and `refactor-analyze` results, and a root-relative script
 path is accepted wherever a class name is accepted (`refactor-dependencies
 routes/web.php` lists what a routes file depends on). `ClassName::class`
@@ -283,17 +290,20 @@ indexing. Defaults exclude `vendor`, `storage`, `bootstrap/cache`,
 file is parsed once per index build. Declaration and reverse-reference maps
 avoid rescanning for each query.
 
-A syntax error, an unreadable file or an internal analysis failure in one PHP file produces a diagnostic (`Analysis failed: …` for the latter two) and indexing continues.
-Text output warns that results may be incomplete; JSON includes file, line, and
-message in `diagnostics`. An invalid project root or missing target class fails
-the command clearly.
+A syntax error, an unreadable file or an internal analysis failure in one PHP
+file produces a diagnostic (`Analysis failed: …` for the latter two) and
+indexing continues. Text output warns that results may be incomplete; JSON
+includes file, line, and message in `diagnostics`. An invalid project root or
+missing target class fails the command clearly.
 
 ## Static-analysis limits
 
 The first version does not execute code, resolve runtime container bindings,
 follow arbitrary assignments across branches, propagate types across method
 boundaries, interpret dynamic class strings, or infer calls from untyped
-receivers. It intentionally reports unknown rather than inventing a target. It also does not track calls to user-defined functions and names nothing for `$this`, `self` or `static` inside anonymous classes.
+receivers. It intentionally reports unknown rather than inventing a target. It
+also does not track calls to user-defined functions and names nothing for
+`$this`, `self` or `static` inside anonymous classes.
 
 ## Agent workflow
 

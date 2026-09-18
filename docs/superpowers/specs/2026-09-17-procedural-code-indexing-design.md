@@ -127,6 +127,8 @@ Local-scope frames carry `currentMethod` as a sixth element so closures and
 functions share the same push/pop code. `writtenVariablesIn()` stops at
 `Function_` nodes exactly as it stops at closures.
 
+Attributes on top-level functions are collected like method attributes.
+
 ### `ClassName::class` references
 
 `StructureCollector::collectClassConstant()` deliberately skipped
@@ -152,6 +154,12 @@ class-like symbols and only falls back to the script when the file has no
 class, so a class file that also declares a helper stays unambiguous and
 `helpers.php::make_user` resolves.
 
+Function targets (`helpers.php::make_user`) resolve, but because calls to
+user-defined functions are not indexed, `analyze`/`impact` report
+`risk: UNKNOWN` and `analyze`/`findCallers`/`impact` add a `ParseDiagnostic`
+(`Calls to user-defined functions are not indexed; caller and impact results
+for <script>::<function> are incomplete.`) so the envelope is `incomplete`.
+
 ### Indexer resilience
 
 `CodebaseIndexer::build()` wraps each `parse()` call:
@@ -169,8 +177,10 @@ try {
 }
 ```
 
-The message deliberately omits the exception's file/line (internal paths
-would leak through the MCP HTTP transport). `PhpAstParser` is unchanged.
+The message deliberately omits the exception's file/line and reduces every
+absolute path inside the exception message to its last segment (internal
+paths would leak through the MCP HTTP transport). `PhpAstParser` is
+unchanged.
 
 ## Behaviour changes (documented in CHANGELOG)
 

@@ -558,6 +558,7 @@ final class StructureCollector extends NodeVisitorAbstract
             'return_types' => $returnTypes,
             'line' => $node->getStartLine(),
         ];
+        $this->collectAttributes($node);
     }
 
     private function enterUncertainScope(Node $node): void
