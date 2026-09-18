@@ -79,11 +79,13 @@ Conversa user_123:
 
 ---
 
-### 2️⃣ **KNOWLEDGE BASE (pgvector no PostgreSQL)**
+### 2️⃣ **KNOWLEDGE BASE (pgvector, Qdrant ou banco relacional)**
 
 **Armazena:** Documentos indexados (FAQ, políticas, manuais) com embeddings
 
 **Quando usar:** Para dar contexto ao agent sobre informações estáticas
+
+**Onde fica:** no pgvector (PostgreSQL), no Qdrant ou no store `database`, que guarda os embeddings numa tabela comum de MySQL, MariaDB, PostgreSQL ou SQLite e ranqueia em PHP (bases de até alguns milhares de chunks por tenant e coleção).
 
 **Formato:**
 ```
@@ -97,7 +99,7 @@ Coleção "politica":
 ├── Chunk 2: [embedding] "LGPD: direitos de acesso e exclusão..."
 ```
 
-**Você perde os dados?** NÃO, fica permanentemente no PostgreSQL
+**Você perde os dados?** NÃO, fica permanentemente no banco (ou no Qdrant)
 
 ---
 
@@ -243,7 +245,7 @@ User (no dia 2, mesma conversa):
 - [ ] É um chatbot onde o context importa?
 - [ ] Quer historico?
 
-**Você precisa usar Knowledge Base (pgvector)?**
+**Você precisa usar Knowledge Base (RAG)?**
 - [ ] Tem FAQ/documentos estáticos?
 - [ ] Quer que o agent consulte políticas/manuais?
 - [ ] Informações não mudam diariamente?
@@ -293,7 +295,7 @@ User (no dia 2, mesma conversa):
 |-----------|---------|-----------|-----------|
 | **Redis (Conversa)** | Histórico de msgs | ✓ Sim (30 dias) | Chats ativos |
 | **Database (Conversa)** | Histórico de msgs | ✗ Não (permanente) | Auditoria |
-| **pgvector (Knowledge)** | Docs indexados | ✗ Não (permanente) | FAQ/contexto |
+| **Knowledge (pgvector, Qdrant ou database)** | Docs indexados | ✗ Não (permanente) | FAQ/contexto |
 | **Tools** | Ações/queries | N/A | Buscar dados |
 
 **Na dúvida:**

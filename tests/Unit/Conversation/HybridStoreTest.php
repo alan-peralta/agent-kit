@@ -9,7 +9,9 @@ use Mockery;
 use Peralta\AgentKit\Conversation\Drivers\HybridStore;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('database')]
 class HybridStoreTest extends TestCase
 {
     protected function defineDatabaseMigrations()

@@ -25,6 +25,9 @@ final class ReactHttpListener
     /** Bind hosts that accept connections on every interface, as HttpServerOptions normalises them. */
     private const WILDCARD_HOSTS = ['0.0.0.0', '[::]'];
 
+    /** Longest the event loop may wait before it re-checks whether a stop was requested. */
+    private const HEARTBEAT_SECONDS = 0.5;
+
     /**
      * Listener-wide "something was served at" timestamp, bumped whenever a request handler
      * returns. Tool execution blocks the single-threaded loop, so a call that runs longer
@@ -92,6 +95,12 @@ final class ReactHttpListener
             $loop->addSignal(SIGTERM, $stop);
         }
 
+        // Signals are handled asynchronously, so one can land after the loop has decided to wait
+        // without a deadline and before it starts waiting. If $stop then closes the last stream,
+        // StreamSelectLoop sleeps until the next signal, which never comes. A heartbeat keeps a
+        // timer pending at all times, so every wait has a deadline and a stop is noticed in time.
+        $heartbeat = $loop->addPeriodicTimer(self::HEARTBEAT_SECONDS, static function (): void {});
+
         if ($options->allowRemote && in_array($options->host, self::WILDCARD_HOSTS, true)) {
             $logger->warning('Bound to a wildcard address; clients must use a hostname or IP listed in AGENT_KIT_MCP_ALLOWED_ORIGINS or requests are answered 403.');
         }
@@ -105,6 +114,8 @@ final class ReactHttpListener
         try {
             $loop->run();
         } finally {
+            // Loop::get() is process-wide: leave no timer behind to keep a later run() alive.
+            $loop->cancelTimer($heartbeat);
             // Every exit path - a signal, a stopped loop or an exception escaping the loop -
             // must release the sessions and the in-memory AST index, not just the signal one.
             $sessions->clear();

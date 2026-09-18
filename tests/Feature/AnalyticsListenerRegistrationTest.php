@@ -5,7 +5,9 @@ namespace Peralta\AgentKit\Tests\Feature;
 use Illuminate\Support\Facades\Log;
 use Peralta\AgentKit\Events\TokenUsageRecorded;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('database')]
 class AnalyticsListenerRegistrationTest extends TestCase
 {
     protected function defineDatabaseMigrations()

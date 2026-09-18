@@ -8,7 +8,9 @@ use Peralta\AgentKit\DTOs\AgentResponse;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\Models\AgentMetric;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('database')]
 class AnalyticsIntegrationTest extends TestCase
 {
     protected function defineDatabaseMigrations()

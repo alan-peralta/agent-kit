@@ -50,7 +50,10 @@ final class McpServeCommand extends Command
 
     private function serveStdio(StdioServerRunner $stdio, McpProjectRoot $root, LoggerInterface $logger): int
     {
-        return $stdio->run($root, $logger, STDIN, STDOUT);
+        // The SDK transport closes the streams it is given when the session ends. Hand it
+        // duplicates so the process's own STDIN/STDOUT stay open for whatever still runs
+        // afterwards (Laravel's error rendering, a console application's terminating callbacks).
+        return $stdio->run($root, $logger, fopen('php://stdin', 'r'), fopen('php://stdout', 'w'));
     }
 
     private function httpOptions(array $config): HttpServerOptions

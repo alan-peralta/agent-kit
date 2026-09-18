@@ -1,6 +1,6 @@
 # Agent Kit
 
-Toolkit Laravel para construir agentes de IA com suporte a múltiplos providers (OpenAI, Anthropic, Gemini, DeepSeek), tools customizadas e RAG via pgvector.
+Toolkit Laravel para construir agentes de IA com suporte a múltiplos providers (OpenAI, Anthropic, Gemini, DeepSeek), tools customizadas e RAG via pgvector, Qdrant ou o próprio banco relacional (MySQL, MariaDB, PostgreSQL ou SQLite).
 
 ## Filosofia
 
@@ -12,13 +12,6 @@ Toolkit Laravel para construir agentes de IA com suporte a múltiplos providers 
 > O pacote ainda não está publicado no Packagist. Registre o repositório Git
 > antes de instalar.
 
-**Pré-requisito:** `php artisan migrate` executa `CREATE EXTENSION IF NOT EXISTS vector`
-na conexão `pgsql` (ou na conexão apontada por `AGENT_KNOWLEDGE_DB`). Antes de rodar
-o comando, tenha um PostgreSQL com a extensão pgvector disponível e já configurado em
-`config/database.php`. Isso vale inclusive para quem só usa tools/conversas ou pretende
-usar Qdrant: hoje a migration do `knowledge_chunks` é publicada e executada junto com
-as demais, sem tag própria.
-
 ```bash
 composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent-kit
 composer require peralta/agent-kit:^0.3
@@ -26,6 +19,35 @@ php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
 ```
+
+A tag `agent-kit-migrations` publica só as tabelas de conversas (`agent_messages`) e de
+métricas (`agent_kit_metrics`). Elas usam apenas tipos portáveis e são testadas no CI em
+MySQL 8.4, MariaDB 11.8, PostgreSQL 17 e SQLite.
+
+A tabela da knowledge base tem uma tag por store. Publique só a do store que você usa,
+antes do `migrate`:
+
+| Store (`AGENT_KNOWLEDGE_STORE`) | Tag | Banco |
+|---|---|---|
+| `pgvector` (padrão) | `agent-kit-pgvector-migrations` | PostgreSQL com a extensão pgvector |
+| `database` | `agent-kit-database-store-migrations` | MySQL, MariaDB, PostgreSQL ou SQLite |
+| `qdrant` | nenhuma | a coleção é criada no Qdrant na primeira escrita |
+
+```bash
+# exemplo com pgvector
+php artisan vendor:publish --tag=agent-kit-pgvector-migrations
+php artisan migrate
+```
+
+A migration do pgvector executa `CREATE EXTENSION IF NOT EXISTS vector` na conexão
+`pgsql` (ou na de `AGENT_KNOWLEDGE_DB`), então esse banco precisa estar configurado em
+`config/database.php` antes do `migrate`. Quem não usa RAG não publica nenhuma tag de
+knowledge base.
+
+As migrations de knowledge base dos stores `pgvector` e `database` criam a mesma tabela,
+`knowledge_chunks`. Publique só a tag do store em uso e evite `vendor:publish --provider`,
+que publica todas as tags. Para trocar de store, apague a tabela antiga ou mude `table` no
+config.
 
 Alternativa mais curta para um checkout local do pacote:
 
@@ -35,6 +57,18 @@ composer require peralta/agent-kit:@dev
 ```
 
 ## Atualizando
+
+Vindo da v0.3.x ou anterior: a migration do `knowledge_chunks` para pgvector saiu da tag
+`agent-kit-migrations` e passou para `agent-kit-pgvector-migrations`.
+
+- Quem usa pgvector e já publicou as migrations não precisa fazer nada, porque o arquivo
+  mantém o mesmo nome. Instalações novas com pgvector publicam as duas tags.
+- Quem usa MySQL, MariaDB, SQLite ou Qdrant e já publicou as migrations de uma versão
+  anterior deve apagar `database/migrations/2026_05_05_000002_create_knowledge_chunks_table.php`
+  do app, se ela ainda não rodou: ela exige PostgreSQL com pgvector e faz o `migrate` falhar.
+- O store `database` funciona com um `config/agent-kit.php` publicado antes desta versão,
+  usando a conexão padrão e a tabela `knowledge_chunks`. Para usar `AGENT_KNOWLEDGE_DB` ou
+  outra tabela, copie o bloco `database` de `knowledge.stores` do config do pacote para o seu.
 
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
 `response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
@@ -220,6 +254,44 @@ QDRANT_COLLECTION=knowledge_chunks
 ```
 
 Para uma instância local sem segurança, deixe `QDRANT_API_KEY` vazio. O pacote cria a coleção física na primeira escrita usando a dimensão do embedding e distância cosseno. Uma coleção física é compartilhada; isolamento de tenant e coleção lógica são aplicados através de filtros de payload.
+
+### Banco relacional (MySQL, MariaDB, PostgreSQL, SQLite)
+
+O store `database` guarda os embeddings numa tabela comum e calcula a similaridade de
+cosseno em PHP. Ele funciona em qualquer banco suportado pelo Laravel, inclusive MySQL 8
+Community, que não tem busca vetorial nativa.
+
+```env
+AGENT_KNOWLEDGE_STORE=database
+# vazio = conexão padrão da aplicação
+AGENT_KNOWLEDGE_DB=
+```
+
+```bash
+php artisan vendor:publish --tag=agent-kit-database-store-migrations
+php artisan migrate
+```
+
+Com um `config/agent-kit.php` publicado antes desta versão, o store usa a conexão padrão e
+a tabela `knowledge_chunks`; veja [Atualizando](#atualizando).
+
+Cada busca lê todos os embeddings do tenant, e da coleção quando ela é informada, então o
+custo cresce de forma linear. Medido em MySQL 8.4 (Docker num Apple M4 Pro) com embeddings
+de 1536 dimensões e a tabela já no buffer pool:
+
+| Chunks por tenant e coleção | Tempo por busca |
+|---|---|
+| 1.000 | 120 ms |
+| 5.000 | 460 ms |
+| 10.000 | 1,0 s |
+
+Quase todo o tempo é leitura: cada chunk carrega cerca de 8 KB de embedding. Com o cache
+frio, ou com um `innodb_buffer_pool_size` menor que a tabela, as mesmas buscas levaram de
+duas a três vezes mais.
+
+Use para FAQs, políticas e manuais de até alguns milhares de chunks por tenant e coleção.
+Acima disso, prefira pgvector ou Qdrant. Trocar de embedder exige reindexar: uma busca com
+dimensão diferente da armazenada lança `KnowledgeStoreException`.
 
 ## Conversas com persistência
 
@@ -428,7 +500,7 @@ diagnóstico e limitações.
 
 ## Documentação
 
-- [SETUP.md](SETUP.md) — guia completo de configuração (PostgreSQL + pgvector, Redis, RAG)
+- [SETUP.md](SETUP.md) — guia completo de configuração (PostgreSQL + pgvector ou MySQL/MariaDB, Redis, RAG)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Redis vs Database vs Knowledge Base, e o Refactoring Core
 - [REFACTORING_AGENT.md](REFACTORING_AGENT.md) — Refactoring Agent: comandos, análise AST, workflow
 - [MCP_SERVER.md](MCP_SERVER.md) — servidor MCP: transportes, segurança, clientes

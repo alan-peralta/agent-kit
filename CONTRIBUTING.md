@@ -15,6 +15,7 @@ Ao propor mudanças, avalie se o comportamento pertence à infraestrutura (pacot
 - Composer
 - Laravel 10, 11 ou 12 (via `orchestra/testbench` para os testes)
 - Extensão `pdo_sqlite` habilitada (usada na suíte de testes)
+- Opcional: `pdo_mysql` e `pdo_pgsql`, para rodar os testes de banco contra MySQL, MariaDB ou PostgreSQL
 
 ## Configurando o ambiente
 
@@ -38,6 +39,39 @@ Para relatório de cobertura:
 vendor/bin/phpunit --coverage-text
 ```
 
+### Contra MySQL, MariaDB ou PostgreSQL
+
+Por padrão a suíte usa SQLite em memória. Os testes que tocam o banco pertencem ao
+grupo `database` e também rodam contra um servidor real, escolhido por variáveis de
+ambiente:
+
+| Variável | Padrão |
+|---|---|
+| `AGENT_KIT_TEST_DB_CONNECTION` | `sqlite` (ou `mysql`, `mariadb`, `pgsql`) |
+| `AGENT_KIT_TEST_DB_HOST` | `127.0.0.1` |
+| `AGENT_KIT_TEST_DB_PORT` | `3306` ou `5432`, conforme o driver |
+| `AGENT_KIT_TEST_DB_DATABASE` | `agent_kit_test` |
+| `AGENT_KIT_TEST_DB_USERNAME` | `root` (MySQL e MariaDB) ou `postgres` |
+| `AGENT_KIT_TEST_DB_PASSWORD` | vazio |
+
+Exemplo com Docker:
+
+```bash
+docker run -d --rm --name agent-kit-mysql -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=agent_kit_test -p 33061:3306 mysql:8.4
+docker run -d --rm --name agent-kit-mariadb -e MARIADB_ROOT_PASSWORD=secret -e MARIADB_DATABASE=agent_kit_test -p 33062:3306 mariadb:11.8
+docker run -d --rm --name agent-kit-pgsql -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=agent_kit_test -p 54329:5432 pgvector/pgvector:pg17
+
+AGENT_KIT_TEST_DB_CONNECTION=mysql AGENT_KIT_TEST_DB_PORT=33061 AGENT_KIT_TEST_DB_PASSWORD=secret vendor/bin/phpunit --group database
+```
+
+Com um servidor configurado, o `TestCase` apaga todas as tabelas do banco ao fim de
+cada teste. Use um banco dedicado aos testes, nunca o da sua aplicação. O driver
+`mariadb` exige Laravel 11 ou superior.
+
+O CI (`.github/workflows/tests.yml`) roda a suíte completa em SQLite e o grupo
+`database` em MySQL 8.4, MariaDB 11.8 e PostgreSQL 17 com pgvector a cada push na
+`main` e em todo pull request.
+
 ## Padrões de código
 
 - PSR-4 (`Peralta\AgentKit\` → `src/`, `Peralta\AgentKit\Tests\` → `tests/`).
@@ -51,6 +85,7 @@ vendor/bin/phpunit --coverage-text
 - Toda feature nova ou correção de bug deve vir acompanhada de testes.
 - Prefira testar comportamento real (HTTP mockado via Guzzle `MockHandler`, banco SQLite em memória) em vez de mocks excessivos que escondem regressões.
 - Use os traits e helpers já existentes em `tests/` (ex.: helper compartilhado de `MockHandler` para providers) antes de duplicar setup.
+- Marque com `#[Group('database')]` todo teste que toca o banco, para que ele rode também contra MySQL, MariaDB e PostgreSQL.
 
 ## Documentação
 

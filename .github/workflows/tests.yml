@@ -1,0 +1,101 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  suite:
+    name: Suite (SQLite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run the suite
+        run: vendor/bin/phpunit --colors=never --no-coverage
+
+      # Subprocess tests (MCP server) report their exceptions to the Testbench skeleton's log.
+      - name: Show the Testbench log on failure
+        if: failure()
+        run: cat vendor/orchestra/testbench-core/laravel/storage/logs/laravel.log || true
+
+  databases:
+    name: Database group (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MySQL 8.4
+            image: mysql:8.4
+            connection: mysql
+            port: 3306
+            health: mysqladmin ping -h 127.0.0.1 -uroot -pagentkit
+            phpunit_flags: ''
+          - name: MariaDB 11.8
+            image: mariadb:11.8
+            connection: mariadb
+            port: 3306
+            health: healthcheck.sh --connect --innodb_initialized
+            phpunit_flags: ''
+          - name: PostgreSQL 17 + pgvector
+            image: pgvector/pgvector:pg17
+            connection: pgsql
+            port: 5432
+            health: pg_isready -h 127.0.0.1 -U postgres
+            phpunit_flags: --fail-on-skipped
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: agentkit
+          MYSQL_DATABASE: agent_kit_test
+          MARIADB_ROOT_PASSWORD: agentkit
+          MARIADB_DATABASE: agent_kit_test
+          POSTGRES_PASSWORD: agentkit
+          POSTGRES_DB: agent_kit_test
+        ports:
+          - ${{ matrix.port }}:${{ matrix.port }}
+        options: >-
+          --health-cmd "${{ matrix.health }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, pdo_pgsql, pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run the database group
+        env:
+          AGENT_KIT_TEST_DB_CONNECTION: ${{ matrix.connection }}
+          AGENT_KIT_TEST_DB_HOST: 127.0.0.1
+          AGENT_KIT_TEST_DB_PORT: ${{ matrix.port }}
+          AGENT_KIT_TEST_DB_DATABASE: agent_kit_test
+          AGENT_KIT_TEST_DB_USERNAME: ${{ matrix.connection == 'pgsql' && 'postgres' || 'root' }}
+          AGENT_KIT_TEST_DB_PASSWORD: agentkit
+        run: vendor/bin/phpunit --colors=never --no-coverage --group database ${{ matrix.phpunit_flags }}

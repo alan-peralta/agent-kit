@@ -33,6 +33,7 @@ use Peralta\AgentKit\Knowledge\Embedders\GeminiEmbedder;
 use Peralta\AgentKit\Knowledge\Embedders\MistralEmbedder;
 use Peralta\AgentKit\Knowledge\Embedders\OpenAIEmbedder;
 use Peralta\AgentKit\Knowledge\KnowledgeIndexer;
+use Peralta\AgentKit\Knowledge\Stores\DatabaseVectorStore;
 use Peralta\AgentKit\Knowledge\Stores\PgvectorStore;
 use Peralta\AgentKit\Knowledge\Stores\QdrantStore;
 use Peralta\AgentKit\Providers\AnthropicProvider;
@@ -98,6 +99,15 @@ class AgentKitServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'agent-kit-migrations');
+
+            // Knowledge tables have one tag per store, so `migrate` only needs the database the chosen store uses.
+            $this->publishes([
+                __DIR__ . '/../database/knowledge/pgvector' => database_path('migrations'),
+            ], 'agent-kit-pgvector-migrations');
+
+            $this->publishes([
+                __DIR__ . '/../database/knowledge/database' => database_path('migrations'),
+            ], 'agent-kit-database-store-migrations');
 
             $this->commands([
                 InstallAgentsCommand::class,
@@ -190,6 +200,10 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->app->bind(KnowledgeStore::class, function ($app) {
             $name = config('agent-kit.knowledge.store', 'pgvector');
             $cfg = config("agent-kit.knowledge.stores.{$name}");
+            if (!$cfg && $name === 'database') {
+                // Configs published before this store existed have no entry for it; its defaults need none.
+                $cfg = ['driver' => 'database'];
+            }
             if (!$cfg) {
                 throw new \RuntimeException("Knowledge store '{$name}' não configurado.");
             }
@@ -205,6 +219,10 @@ class AgentKitServiceProvider extends ServiceProvider
                     collection: $cfg['collection'] ?? 'knowledge_chunks',
                     timeout: (float) ($cfg['timeout'] ?? 30),
                     batchSize: (int) ($cfg['batch_size'] ?? 100),
+                ),
+                'database' => new DatabaseVectorStore(
+                    connection: $cfg['connection'] ?? null,
+                    table: $cfg['table'] ?? 'knowledge_chunks',
                 ),
                 default => throw new \RuntimeException("Driver de knowledge store '{$cfg['driver']}' inválido."),
             };
