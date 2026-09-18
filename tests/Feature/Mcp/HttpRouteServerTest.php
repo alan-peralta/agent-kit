@@ -43,6 +43,9 @@ final class HttpRouteServerTest extends TestCase
     private array $serverPipes = [];
 
     private ?string $envFile = null;
+    private bool $envFileExistedBeforeTest = false;
+    private ?string $originalEnvContents = null;
+    private ?string $writtenEnvContents = null;
 
     protected function tearDown(): void
     {
@@ -95,6 +98,55 @@ final class HttpRouteServerTest extends TestCase
         self::assertSame(200, $delete->getStatusCode());
     }
 
+    /**
+     * startServer() has to overwrite the skeleton .env with its own MCP directives even when a
+     * real, pre-existing file is already there (a developer's own local skeleton config, for
+     * instance) - the served app needs those directives on disk to load the route at all. Proves
+     * that file comes back byte-for-byte once the server stops, instead of staying clobbered.
+     */
+    public function test_a_pre_existing_skeleton_env_survives_the_run_unchanged(): void
+    {
+        $envFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
+        $sentinel = "SENTINEL_DEVELOPER_ENV=do-not-lose-me\nDB_CONNECTION=sqlite\n";
+        file_put_contents($envFile, $sentinel);
+
+        $port = $this->freePort();
+        $this->startServer($port);
+
+        // A light sanity check that the server is really up and serving our config, not just that
+        // the port happened to accept a connection.
+        $client = new Client(['http_errors' => false, 'timeout' => 10, 'connect_timeout' => 5]);
+        $response = $client->post("http://127.0.0.1:{$port}/mcp", [
+            'headers' => ['Accept' => 'application/json, text/event-stream', 'Content-Type' => 'application/json'],
+            'body' => $this->initialize(),
+        ]);
+        self::assertSame(401, $response->getStatusCode());
+
+        // Stop and restore now, inside the test, so the byte-for-byte assertion below runs
+        // against the actually-restored file rather than after PHPUnit has already moved on.
+        $this->stopServer();
+
+        try {
+            self::assertSame(
+                $sentinel,
+                file_get_contents($envFile),
+                'A pre-existing skeleton .env must survive the test run byte-for-byte.',
+            );
+        } finally {
+            // The sentinel above simulates a developer's pre-existing file only for this proof;
+            // it was never a real one, so - unlike stopServer()'s restore behaviour for an actual
+            // pre-existing file, which is exactly what was just verified above - this test removes
+            // it once that proof is done, so the repository ends the run with no skeleton .env at
+            // all, matching SpawnsMcpServer's own expectations. envFile is cleared first so
+            // tearDown()'s own stopServer() call, which still runs after this method returns, does
+            // not restore (and thereby resurrect) it a second time.
+            $this->envFile = null;
+            if (is_file($envFile) && file_get_contents($envFile) === $sentinel) {
+                @unlink($envFile);
+            }
+        }
+    }
+
     private function freePort(): int
     {
         $socket = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
@@ -109,10 +161,18 @@ final class HttpRouteServerTest extends TestCase
     {
         $this->envFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
 
-        // spawn() only places the harmless fixture .env when the skeleton has none yet, so writing
-        // ours first makes it keep this one: see the class docblock for why the served app needs
-        // these directives on disk rather than passed as process environment variables.
-        file_put_contents($this->envFile, implode("\n", [
+        // Remember whatever is already there - a developer's own local skeleton .env, or nothing
+        // at all - so stopServer() can put it back exactly, byte-for-byte, instead of the blanket
+        // delete SpawnsMcpServer::removeSkeletonEnvironmentFile() does for its own harmless
+        // fixture (which never overwrites an existing file in the first place, so it never needs
+        // a restore path; this test does overwrite one, so it needs one).
+        $this->envFileExistedBeforeTest = is_file($this->envFile);
+        $this->originalEnvContents = $this->envFileExistedBeforeTest ? (string) file_get_contents($this->envFile) : null;
+
+        // Write ours unconditionally, even over a real pre-existing file: see the class docblock
+        // for why the served app needs these directives on disk rather than passed as process
+        // environment variables.
+        $this->writtenEnvContents = implode("\n", [
             'APP_ENV=testing',
             "APP_URL=http://127.0.0.1:{$port}",
             'AGENT_KIT_MCP_HTTP_ENABLED=true',
@@ -120,7 +180,8 @@ final class HttpRouteServerTest extends TestCase
             'AGENT_KIT_MCP_PROJECT_ROOT=' . $this->fixtureRoot(),
             'CACHE_STORE=file',
             '',
-        ]));
+        ]);
+        file_put_contents($this->envFile, $this->writtenEnvContents);
 
         [$this->serverProcess, $this->serverPipes] = $this->spawn([
             $this->packageRoot() . '/vendor/bin/testbench', 'serve', '--host=127.0.0.1', "--port={$port}",
@@ -138,7 +199,26 @@ final class HttpRouteServerTest extends TestCase
             usleep(100000);
         }
 
-        self::fail("The built-in server never accepted connections on 127.0.0.1:{$port}.");
+        self::fail("The built-in server never accepted connections on 127.0.0.1:{$port}.\n" . $this->drainServerOutput());
+    }
+
+    /**
+     * Non-blocking read of whatever the server has already written, for the readiness-timeout
+     * failure message - the same diagnostics SpawnsMcpServer::finish() attaches on its own
+     * timeout path, which this method never reaches since the server is still running.
+     */
+    private function drainServerOutput(): string
+    {
+        if (!is_resource($this->serverProcess) || !isset($this->serverPipes[1], $this->serverPipes[2])) {
+            return '(no server process to read output from)';
+        }
+
+        stream_set_blocking($this->serverPipes[1], false);
+        stream_set_blocking($this->serverPipes[2], false);
+        $stdout = (string) stream_get_contents($this->serverPipes[1]);
+        $stderr = (string) stream_get_contents($this->serverPipes[2]);
+
+        return "STDOUT:\n{$stdout}\nSTDERR:\n{$stderr}";
     }
 
     /** Stops the server and cleans up even when the test above failed before reaching here. */
@@ -165,19 +245,41 @@ final class HttpRouteServerTest extends TestCase
     }
 
     /**
-     * Undoes what startServer() wrote outside the harmless fixture that removeSkeletonEnvironmentFile()
-     * (part of finish()'s own cleanup) already handles: our own .env contents, and the file cache
+     * Undoes what startServer() wrote outside the harmless-fixture removal that finish()'s own
+     * cleanup (removeSkeletonEnvironmentFile()) already handles - which never fires here anyway,
+     * since our contents never equal that fixture's: our own .env contents, and the file cache
      * the served process's Psr16SessionStore wrote under the skeleton's storage directory.
      */
     private function cleanUpServedState(): void
     {
-        if ($this->envFile !== null && is_file($this->envFile)) {
-            @unlink($this->envFile);
-        }
+        $this->restoreSkeletonEnvironmentFile();
 
         $cache = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/storage/framework/cache/data';
         foreach (glob($cache . '/*') ?: [] as $entry) {
             is_dir($entry) ? $this->deleteDirectory($entry) : @unlink($entry);
+        }
+    }
+
+    /**
+     * Restores a real, pre-existing skeleton .env byte-for-byte. Otherwise, removes this test's
+     * own file - but only while it still holds exactly what startServer() wrote, the same
+     * conservative equality check SpawnsMcpServer::removeSkeletonEnvironmentFile() uses for its
+     * harmless fixture, so a write from anything else during the run is never clobbered.
+     */
+    private function restoreSkeletonEnvironmentFile(): void
+    {
+        if ($this->envFile === null) {
+            return;
+        }
+
+        if ($this->envFileExistedBeforeTest) {
+            file_put_contents($this->envFile, $this->originalEnvContents);
+
+            return;
+        }
+
+        if (is_file($this->envFile) && file_get_contents($this->envFile) === $this->writtenEnvContents) {
+            @unlink($this->envFile);
         }
     }
 
