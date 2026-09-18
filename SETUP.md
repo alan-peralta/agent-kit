@@ -28,10 +28,6 @@ php artisan vendor:publish --tag=agent-kit-pgvector-migrations
 > MySQL/MariaDB: troque a tag do pgvector por `agent-kit-database-store-migrations` para
 > usar o store `database`, ou não publique nenhuma tag de knowledge base se for usar Qdrant.
 
-> Laravel 13: um app novo vem com o Guzzle 8, e o Agent Kit ainda exige o Guzzle 7. Acrescente
-> `-W` ao `composer require` para o Composer rebaixar o Guzzle para 7.x, que o Laravel 13 também
-> aceita.
-
 > Refactoring Agent e servidor MCP: os comandos de AST (`refactor-analyze`, `-callers`,
 > `-dependencies` e `-impact`) e o `agent-kit:mcp` usam pacotes opcionais. Instale-os só em
 > desenvolvimento com `composer require --dev mcp/sdk nikic/php-parser`; veja
@@ -82,7 +78,7 @@ AGENT_KIT_ANALYTICS_PERSIST=false
 # Servidor MCP (opcional - Claude Code, Cursor, Codex, Inspector)
 AGENT_KIT_MCP_ENABLED=true
 AGENT_KIT_MCP_HTTP_ENABLED=false
-# AGENT_KIT_MCP_BEARER_TOKEN=   # obrigatório só para --transport=http (32+ chars)
+# AGENT_KIT_MCP_BEARER_TOKEN=   # obrigatório só com AGENT_KIT_MCP_HTTP_ENABLED=true (32+ chars)
 ```
 
 > MySQL/MariaDB: use `AGENT_KNOWLEDGE_STORE=database` e deixe `AGENT_KNOWLEDGE_DB=` vazio
@@ -457,7 +453,7 @@ tail -f storage/logs/laravel.log
 ### Servidor MCP não conecta?
 
 - stdio: rode `php artisan agent-kit:mcp --path=/projeto < /dev/null` e leia o stderr; erros de inicialização retornam código 1.
-- HTTP: confira `AGENT_KIT_MCP_HTTP_ENABLED=true`, `AGENT_KIT_MCP_BEARER_TOKEN` com 32+ caracteres e o header `Authorization: Bearer <token>`; `403` indica origin/host fora de `AGENT_KIT_MCP_ALLOWED_ORIGINS`.
+- HTTP: confira `AGENT_KIT_MCP_HTTP_ENABLED=true`, `AGENT_KIT_MCP_BEARER_TOKEN` com 32+ caracteres e o header `Authorization: Bearer <token>`; `403` indica origin/host fora de `AGENT_KIT_MCP_ALLOWED_ORIGINS` ou cliente fora de loopback (`AGENT_KIT_MCP_ALLOW_REMOTE`); `503` indica configuração inválida (veja o log da aplicação).
 - Detalhes em [MCP_SERVER.md](MCP_SERVER.md).
 
 ---

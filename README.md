@@ -20,10 +20,6 @@ php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
 ```
 
-> Laravel 13: um app novo vem com o Guzzle 8, e o Agent Kit ainda exige o Guzzle 7. Acrescente
-> `-W` ao `composer require` para o Composer rebaixar o Guzzle para 7.x, que o Laravel 13 também
-> aceita.
-
 Isso basta para o núcleo de agentes: providers, tools, conversas e RAG. O Refactoring Agent
 e o servidor MCP usam pacotes opcionais, instalados à parte e de preferência só em
 desenvolvimento; veja [Refactoring Agent](#refactoring-agent) e [Servidor MCP](#servidor-mcp).
@@ -93,6 +89,18 @@ Sem eles, o `agent-kit:mcp` sai com `The MCP server requires mcp/sdk` e os coman
 respondem com o código de erro `DEPENDENCY_MISSING`, sempre com o comando de instalação.
 O SDK traz o plugin do Composer `php-http/discovery`, que o kit não usa; veja em
 [MCP_SERVER.md](MCP_SERVER.md#prerequisites) como recusá-lo antes do `require`.
+
+Vindo da v0.3.x ou anterior: quem usava o transporte HTTP do servidor MCP
+(`agent-kit:mcp --transport=http`) precisa migrar para a rota da própria aplicação.
+Habilite `AGENT_KIT_MCP_HTTP_ENABLED=true` e um `AGENT_KIT_MCP_BEARER_TOKEN` no `.env`,
+sirva a aplicação como sempre (`php artisan serve`, PHP-FPM ou Octane) e aponte o cliente
+para `<APP_URL><AGENT_KIT_MCP_HTTP_PATH>` (por exemplo, `http://127.0.0.1:8000/mcp` com
+`php artisan serve`) em vez do antigo `--host`/`--port`. Remova do `.env` as variáveis
+`AGENT_KIT_MCP_HTTP_HOST`, `AGENT_KIT_MCP_HTTP_PORT`, `AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT`,
+`AGENT_KIT_MCP_HTTP_MAX_CONCURRENT` e `AGENT_KIT_MCP_HTTP_MAX_SESSIONS`, que não existem
+mais; `react/http` deixou de ser necessário. `agent-kit:mcp --transport=http` agora sai
+com uma mensagem explicando a mudança em vez de tentar escutar. Veja
+[MCP_SERVER.md](MCP_SERVER.md#streamable-http).
 
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
 `response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
@@ -523,10 +531,20 @@ Streamable HTTP:
 ```bash
 # stdio (padrão) — use em .mcp.json / .cursor/mcp.json / ~/.codex/config.toml
 php artisan agent-kit:mcp --path=/caminho/absoluto/do/projeto
+```
 
-# Streamable HTTP — opt-in, bind em 127.0.0.1, bearer token obrigatório
-AGENT_KIT_MCP_HTTP_ENABLED=true AGENT_KIT_MCP_BEARER_TOKEN=... \
-php artisan agent-kit:mcp --transport=http --path=/caminho/absoluto/do/projeto --port=8787
+Streamable HTTP não é um processo à parte: é uma rota da própria aplicação Laravel,
+opt-in, loopback por padrão e sempre com bearer token.
+
+```env
+# .env
+AGENT_KIT_MCP_HTTP_ENABLED=true
+AGENT_KIT_MCP_BEARER_TOKEN=... # 32+ caracteres
+```
+
+```bash
+php artisan serve
+# endpoint: <APP_URL><AGENT_KIT_MCP_HTTP_PATH>, ex.: http://127.0.0.1:8000/mcp
 ```
 
 O servidor usa pacotes que a instalação padrão não traz. Instale-os em desenvolvimento

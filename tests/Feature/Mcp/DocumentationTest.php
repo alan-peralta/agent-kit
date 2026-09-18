@@ -24,7 +24,7 @@ final class DocumentationTest extends TestCase
         foreach ([$mcp, $readme, $refactoring, $setup] as $document) {
             self::assertStringContainsString('agent-kit:mcp', $document);
         }
-        foreach (['AGENT_KIT_MCP_ENABLED', 'AGENT_KIT_MCP_TRANSPORT', 'AGENT_KIT_MCP_PROJECT_ROOT', 'AGENT_KIT_MCP_HTTP_PATH', 'AGENT_KIT_MCP_ALLOW_REMOTE', 'AGENT_KIT_MCP_ALLOWED_ORIGINS', 'AGENT_KIT_MCP_BEARER_TOKEN'] as $variable) {
+        foreach (['AGENT_KIT_MCP_ENABLED', 'AGENT_KIT_MCP_TRANSPORT', 'AGENT_KIT_MCP_PROJECT_ROOT', 'AGENT_KIT_MCP_HTTP_PATH', 'AGENT_KIT_MCP_ALLOW_REMOTE', 'AGENT_KIT_MCP_ALLOWED_ORIGINS', 'AGENT_KIT_MCP_BEARER_TOKEN', 'AGENT_KIT_MCP_HTTP_CACHE_STORE', 'AGENT_KIT_MCP_HTTP_TIME_LIMIT', 'AGENT_KIT_MCP_INDEX_CACHE_PATH'] as $variable) {
             self::assertStringContainsString($variable, $mcp, $variable);
             self::assertStringContainsString($variable, $env, $variable);
         }
@@ -36,6 +36,9 @@ final class DocumentationTest extends TestCase
         foreach (['does not exist yet', 'is a future adapter', 'ainda não está disponível', 'integração futura', 'futuro servidor MCP', 'Future MCP'] as $stale) {
             self::assertStringNotContainsString($stale, $readme, $stale);
             self::assertStringNotContainsString($stale, $refactoring, $stale);
+        }
+        foreach (['ReactPHP', 'react/http', '--allow-remote', '--port', 'AGENT_KIT_MCP_HTTP_PORT'] as $stale) {
+            self::assertStringNotContainsString($stale, $mcp, $stale);
         }
         self::assertDoesNotMatchRegularExpression('/AGENT_KIT_MCP_BEARER_TOKEN=\S+/', $env, 'No token value may be committed.');
         self::assertDoesNotMatchRegularExpression('/Bearer [0-9a-f]{32,}/', $mcp, 'Docs must use placeholders, never real-looking tokens.');
