@@ -19,7 +19,7 @@ Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (K
 
 ```bash
 composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent-kit
-composer require peralta/agent-kit:^0.3
+composer require peralta/agent-kit:^0.4
 php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
 php artisan vendor:publish --tag=agent-kit-pgvector-migrations

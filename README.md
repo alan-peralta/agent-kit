@@ -14,7 +14,7 @@ Toolkit Laravel para construir agentes de IA com suporte a múltiplos providers 
 
 ```bash
 composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent-kit
-composer require peralta/agent-kit:^0.3
+composer require peralta/agent-kit:^0.4
 php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
@@ -61,6 +61,11 @@ composer require peralta/agent-kit:@dev
 ```
 
 ## Atualizando
+
+Vindo da v0.3.x: a v0.4.0 quebra compatibilidade para quem usa o servidor MCP, os comandos
+de AST do Refactoring Agent ou o transporte HTTP do MCP; as notas abaixo dizem o que mudar.
+Como `^0.3` não alcança a 0.4.0, ajuste a restrição
+(`composer require peralta/agent-kit:^0.4`).
 
 Vindo da v0.3.x ou anterior: a migration do `knowledge_chunks` para pgvector saiu da tag
 `agent-kit-migrations` e passou para `agent-kit-pgvector-migrations`.
