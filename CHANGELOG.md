@@ -9,6 +9,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [0.2.0] - 2026-09-18
 
+_Atualizando da v0.1.0: veja a seção "Atualizando" do [README](README.md#atualizando)._
+
 ### Adicionado
 - Refactoring Agent: análise estrutural determinística de projetos Laravel pelos comandos `agent-kit:refactor-capabilities`, `agent-kit:refactor-audit`, `agent-kit:refactor-analyze`, `agent-kit:refactor-callers`, `agent-kit:refactor-dependencies` e `agent-kit:refactor-impact`, com saída humana e JSON (`--json`) em envelope estável (`schema_version`, `capability`, `incomplete`, `data`, `diagnostics`, `unresolved`) e erros `{schema_version, error: {code, message}}`.
 - Índice AST com `nikic/php-parser`: símbolos (classes, interfaces, traits, enums, métodos, propriedades, constantes, atributos), grafo de dependências tipado com confiança (`exact`/`inferred`/`unknown`), análise de callers e de impacto (dependentes diretos, estruturais e transitivos, arquivos afetados e risco por limiares configuráveis), evidência explícita de referências não resolvidas e reconhecimento de padrões Laravel (`event()`, `dispatch()`, `Bus`/`Event`, Facades, `app()`/`resolve()`/`app()->make()`).

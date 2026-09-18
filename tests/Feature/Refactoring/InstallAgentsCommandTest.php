@@ -347,7 +347,12 @@ MARKDOWN, $contents);
         self::assertStringContainsString('CLI', $matches['diagram']);
         self::assertStringContainsString('Coding Agents', $matches['diagram']);
         self::assertStringContainsString('MCP', $matches['diagram']);
-        self::assertStringContainsString('No `/refactor-apply` command is generated.', $contents);
+        self::assertStringContainsString(
+            $file === 'README.md'
+                ? 'Nenhum comando `/refactor-apply` é gerado e a tool'
+                : 'No `/refactor-apply` command is generated.',
+            $contents,
+        );
     }
 
     /** @return iterable<string, array{string}> */

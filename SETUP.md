@@ -14,10 +14,21 @@ Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (K
 
 ## 📋 Passo 1: Instalar o pacote
 
+> O pacote ainda não está publicado no Packagist. Registre o repositório Git
+> antes de instalar.
+
 ```bash
-composer require peralta/agent-kit
+composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent-kit
+composer require peralta/agent-kit:^0.2
 php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
+```
+
+Alternativa mais curta para um checkout local do pacote:
+
+```bash
+composer config repositories.agent-kit path ../agent-kit
+composer require peralta/agent-kit:@dev
 ```
 
 ---
@@ -36,7 +47,7 @@ OPENAI_API_KEY=sk-xxxxx              # necessário para embeddings do RAG
 AGENT_CONVERSATION_DRIVER=redis
 AGENT_CONVERSATION_REDIS=default
 
-# Knowledge Base (PostgreSQL + pgvector, ou Qdrant)
+# Knowledge Base (PostgreSQL + pgvector; Qdrant é alternativa de store, mas a migration do pgvector continua sendo executada)
 AGENT_KNOWLEDGE_STORE=pgvector
 AGENT_KNOWLEDGE_DB=pgsql
 AGENT_EMBEDDER=openai
@@ -71,6 +82,12 @@ AGENT_KIT_MCP_HTTP_ENABLED=false
 
 ## 🗄️ Passo 3: Rodar as migrations
 
+> ⚠️ Este passo exige o PostgreSQL com pgvector **já rodando e configurado** como a
+> conexão `pgsql` (ou a de `AGENT_KNOWLEDGE_DB`). Num app Laravel 11/12 novo, que vem
+> com `DB_CONNECTION=sqlite`, o comando falha com
+> `SQLSTATE[HY000]: General error: 1 near "EXTENSION": syntax error`.
+> A verificação do Passo 4 acontece depois da migration — confirme o banco antes.
+
 ```bash
 php artisan migrate
 ```
@@ -91,7 +108,7 @@ php artisan tinker
 
 # Dentro do tinker:
 DB::select('CREATE EXTENSION IF NOT EXISTS vector');
-DB::select('SELECT 1 FROM pg_extension WHERE extname = "vector"');
+DB::select("SELECT 1 FROM pg_extension WHERE extname = 'vector'");
 # Deve retornar: [stdClass Object ( [1] => 1 )]
 
 exit
@@ -339,10 +356,9 @@ bastando habilitar via `.env`:
 - **Eventos de analytics** (uso de tokens, tool calls, latência, retries), com
   persistência opcional na tabela `agent_kit_metrics`.
 
-```bash
-php artisan vendor:publish --tag=agent-kit-migrations
-php artisan migrate  # cria a tabela agent_kit_metrics, se ainda não existir
-```
+A tabela `agent_kit_metrics` já foi criada no Passo 3: as três migrations do pacote
+compartilham a mesma tag `agent-kit-migrations`. Para persistir métricas, basta
+ligar `AGENT_KIT_ANALYTICS_PERSIST=true` no `.env`.
 
 Ajuste as políticas de retry por tipo de erro e as opções de analytics em
 `config/agent-kit.php` → `error_recovery` e `analytics`. Detalhes completos em
@@ -429,6 +445,8 @@ tail -f storage/logs/laravel.log
 - Veja [README.md](README.md) para uso básico
 - Veja [config/agent-kit.php](config/agent-kit.php) para todas as opções de configuração
 - Leia o código em `src/` para entender a arquitetura
+- Veja [REFACTORING_AGENT.md](REFACTORING_AGENT.md) para o Refactoring Agent e os comandos `agent-kit:refactor-*`
+- Veja [ARCHITECTURE.md](ARCHITECTURE.md) para as decisões de persistência
 
 ---
 
