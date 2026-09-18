@@ -93,6 +93,34 @@ final class CodebaseIndexerTest extends TestCase
         ]], array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics()));
     }
 
+    public function test_analysis_failure_diagnostics_keep_only_basenames_of_absolute_paths(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-redact-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Broken.php', '<?php class Broken {}');
+
+        $parser = new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                throw new \RuntimeException(
+                    "Não foi possível ler {$file}, called in /opt/tool/src/StructureCollector.php on line 12 (C:\\tool\\Collector.php). Class App\\Services\\Foo stays.",
+                );
+            }
+        };
+
+        try {
+            $index = (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), $parser))->build($root);
+        } finally {
+            unlink($root . '/Broken.php');
+            rmdir($root);
+        }
+
+        $this->assertSame(
+            'Analysis failed: RuntimeException: Não foi possível ler Broken.php, called in StructureCollector.php on line 12 (Collector.php). Class App\\Services\\Foo stays.',
+            $index->diagnostics()[0]->message,
+        );
+    }
+
     public function test_it_indexes_real_declarations_and_reverse_references(): void
     {
         $root = dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast';

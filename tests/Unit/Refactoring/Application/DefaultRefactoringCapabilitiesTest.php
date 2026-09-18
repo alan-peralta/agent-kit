@@ -609,7 +609,13 @@ PHP);
             $this->assertSame('Standalone.php', $function->data['target']);
             $this->assertSame('helper', $function->data['method']);
             $this->assertSame([], $function->data['upstream_dependencies']);
-            $this->assertSame('LOW', $function->data['risk']);
+            $this->assertSame('UNKNOWN', $function->data['risk']);
+            $this->assertSame([[
+                'file' => 'Standalone.php',
+                'line' => 3,
+                'message' => 'Calls to user-defined functions are not indexed; caller and impact results for Standalone.php::helper are incomplete.',
+            ]], $function->toArray()['diagnostics']);
+            $this->assertTrue($function->incomplete());
         } finally {
             if (is_file($file)) {
                 unlink($file);
@@ -915,6 +921,18 @@ PHP));
             $function = $this->service()->analyze($root, 'app/helpers.php::make_user');
             $this->assertSame('app/helpers.php', $function->data['target']);
             $this->assertSame('make_user', $function->data['method']);
+            $this->assertSame('UNKNOWN', $function->data['risk']);
+            $this->assertTrue($function->incomplete());
+            $this->assertStringContainsString('app/helpers.php::make_user are incomplete', $function->toArray()['diagnostics'][0]['message']);
+
+            $functionCallers = $this->service()->findCallers($root, 'app/helpers.php::make_user');
+            $this->assertSame([], $functionCallers->data['direct_callers']);
+            $this->assertTrue($functionCallers->incomplete());
+            $this->assertSame(4, $functionCallers->toArray()['diagnostics'][0]['line']);
+
+            $functionImpact = $this->service()->impact($root, 'app/helpers.php::make_user');
+            $this->assertSame('UNKNOWN', $functionImpact->data['risk']);
+            $this->assertTrue($functionImpact->incomplete());
         });
     }
 
@@ -934,6 +952,20 @@ PHP));
             } catch (CapabilityException $exception) {
                 $this->assertSame('TARGET_NOT_FOUND', $exception->errorCode);
                 $this->assertSame('Method not found: App\\Support\\Clock::missing', $exception->getMessage());
+            }
+        });
+    }
+
+    public function test_a_file_with_two_classes_and_script_code_stays_ambiguous_for_method_targets(): void
+    {
+        $this->withProject([
+            'app/Pair.php' => "<?php\nnamespace App;\nclass First { public function go(): void {} }\nclass Second { public function go(): void {} }\nFirst::class;",
+        ], function (string $root): void {
+            try {
+                $this->service()->analyze($root, 'app/Pair.php::go');
+                $this->fail('Expected an ambiguous target error.');
+            } catch (CapabilityException $exception) {
+                $this->assertSame('AMBIGUOUS_TARGET', $exception->errorCode);
             }
         });
     }

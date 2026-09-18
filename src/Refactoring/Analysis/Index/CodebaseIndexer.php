@@ -35,13 +35,14 @@ final class CodebaseIndexer
             try {
                 $parsed = $this->parser->parse($file, $relative);
             } catch (\Throwable $failure) {
-                // One unreadable or unanalysable file must not abort the whole index; the
-                // message deliberately omits the exception's own file/line (internal paths
-                // would otherwise leave the process through the MCP HTTP transport).
+                // One unreadable or unanalysable file must not abort the whole index. The
+                // diagnostic keeps only basenames from the exception message and never adds
+                // the exception's own file/line: absolute paths would otherwise leave the
+                // process through the MCP HTTP transport.
                 $diagnostics[] = new ParseDiagnostic(
                     $relative,
                     1,
-                    sprintf('Analysis failed: %s: %s', $failure::class, $failure->getMessage()),
+                    sprintf('Analysis failed: %s: %s', $failure::class, $this->withoutAbsolutePaths($failure->getMessage())),
                 );
                 continue;
             }
@@ -144,5 +145,11 @@ final class CodebaseIndexer
     private function normalizedRoot(string $root): string
     {
         return ProjectRoot::normalize($root);
+    }
+
+    /** Reduces every absolute Unix or Windows path in a message to its last segment. */
+    private function withoutAbsolutePaths(string $message): string
+    {
+        return preg_replace('~(?:[A-Za-z]:\\\\|/)(?:[^/\\\\\s]+[/\\\\])*([^/\\\\\s]+)~', '$1', $message) ?? $message;
     }
 }

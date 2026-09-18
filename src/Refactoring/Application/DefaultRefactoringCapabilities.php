@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
+use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParseDiagnostic;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndex;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
@@ -135,10 +136,17 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             $data['risk'] = $this->impactAnalyzer->riskForDependents(count($dependents));
         }
 
+        $functionDiagnostic = $isFileTarget && $symbols !== []
+            ? $this->functionTargetDiagnostic($symbols[0], $method)
+            : null;
+        if ($functionDiagnostic !== null) {
+            $data['risk'] = 'UNKNOWN';
+        }
+
         return new CapabilityResult(
             'analyze',
             $data,
-            $index->diagnostics(),
+            $functionDiagnostic === null ? $index->diagnostics() : [...$index->diagnostics(), $functionDiagnostic],
             $index->unresolvedReferences(),
         );
     }
@@ -151,13 +159,14 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         $symbol = $this->requireClass($index, $requested->value);
         $method = $this->canonicalMethod($index, $symbol->fqcn, $requested->method);
         $result = $this->callers->findCallers($index, $symbol->fqcn, $method);
+        $functionDiagnostic = $this->functionTargetDiagnostic($symbol, $method);
         $data = $result->toArray();
         unset($data['diagnostics'], $data['unresolved']);
 
         return new CapabilityResult(
             'find_callers',
             $data,
-            $result->diagnostics,
+            $functionDiagnostic === null ? $result->diagnostics : [...$result->diagnostics, $functionDiagnostic],
             $result->unresolved,
         );
     }
@@ -192,13 +201,17 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         $symbol = $this->requireClass($index, $requested->value);
         $method = $this->canonicalMethod($index, $symbol->fqcn, $requested->method);
         $result = $this->impactAnalyzer->analyze($index, $symbol->fqcn, $method);
+        $functionDiagnostic = $this->functionTargetDiagnostic($symbol, $method);
         $data = $result->toArray();
         unset($data['diagnostics']);
+        if ($functionDiagnostic !== null) {
+            $data['risk'] = 'UNKNOWN';
+        }
 
         return new CapabilityResult(
             'impact',
             $data,
-            $result->diagnostics,
+            $functionDiagnostic === null ? $result->diagnostics : [...$result->diagnostics, $functionDiagnostic],
             $index->unresolvedReferences(),
         );
     }
@@ -361,6 +374,34 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         throw new CapabilityException(
             'TARGET_NOT_FOUND',
             "Method not found: {$symbol->fqcn}::{$method}",
+        );
+    }
+
+    /**
+     * Calls to user-defined functions are not indexed, so caller and impact results for a
+     * top-level function are structurally empty: say so instead of reporting a confident risk.
+     */
+    private function functionTargetDiagnostic(SymbolDefinition $symbol, ?string $function): ?ParseDiagnostic
+    {
+        if ($function === null || $symbol->kind !== 'script') {
+            return null;
+        }
+        $line = 1;
+        foreach ($symbol->methods as $definition) {
+            if (strcasecmp($definition['name'], $function) === 0) {
+                $line = $definition['line'];
+                break;
+            }
+        }
+
+        return new ParseDiagnostic(
+            $symbol->file,
+            $line,
+            sprintf(
+                'Calls to user-defined functions are not indexed; caller and impact results for %s::%s are incomplete.',
+                $symbol->fqcn,
+                $function,
+            ),
         );
     }
 
