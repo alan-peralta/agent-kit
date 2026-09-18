@@ -99,6 +99,11 @@ class AgentKitServiceProvider extends ServiceProvider
                 __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'agent-kit-migrations');
 
+            // Knowledge tables have one tag per store, so `migrate` only needs the database the chosen store uses.
+            $this->publishes([
+                __DIR__ . '/../database/knowledge/pgvector' => database_path('migrations'),
+            ], 'agent-kit-pgvector-migrations');
+
             $this->commands([
                 InstallAgentsCommand::class,
                 RefactorAuditCommand::class,
