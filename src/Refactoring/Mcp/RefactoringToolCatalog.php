@@ -10,7 +10,7 @@ final class RefactoringToolCatalog
     public const RESOURCE_URI = 'agent-kit://refactoring/capabilities';
     public const RESOURCE_NAME = 'refactoring_capabilities';
 
-    private const TARGET_DESCRIPTION = 'Project-relative or absolute in-project PHP file (analyze only), fully qualified class name, or Class::method where the capability supports method scope. The path is resolved inside the fixed project root of this server.';
+    private const TARGET_DESCRIPTION = 'Project-relative or absolute in-project PHP file (used by refactoring_analyze), fully qualified class name, the root-relative path of a script file such as routes/web.php wherever a class is accepted, or Class::method / file.php::function where the capability supports method scope; function targets return risk: UNKNOWN plus a diagnostic because calls to user-defined functions are not indexed. The path is resolved inside the fixed project root of this server.';
 
     private const NO_ARGUMENTS = ['type' => 'object', 'properties' => [], 'additionalProperties' => false];
 

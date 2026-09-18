@@ -49,7 +49,7 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
                 'name' => 'find_callers',
                 'targets' => ['class', 'method'],
                 'mcp_tool' => 'refactoring_callers',
-                'cli_fallback' => 'php artisan agent-kit:refactor-callers <class> --method=<method> --json',
+                'cli_fallback' => 'php artisan agent-kit:refactor-callers "<class>[::<method>]" --json',
                 'json' => true,
             ],
             [
@@ -63,7 +63,7 @@ final class DefaultRefactoringCapabilitiesTest extends TestCase
                 'name' => 'impact',
                 'targets' => ['class', 'method'],
                 'mcp_tool' => 'refactoring_impact',
-                'cli_fallback' => 'php artisan agent-kit:refactor-impact <class> --method=<method> --json',
+                'cli_fallback' => 'php artisan agent-kit:refactor-impact "<class>[::<method>]" --json',
                 'json' => true,
             ],
         ], $result->data['capabilities']);

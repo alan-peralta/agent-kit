@@ -22,6 +22,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - `StructureCollector` não quebra mais em código PHP fora de classes nomeadas (closures, `if`, ternários, `??`, `match` no topo do arquivo, funções globais e corpos de classes anônimas): `leaveNode()` passa a espelhar a guarda de `enterNode()`, evitando o esvaziamento das pilhas de escopo que fazia `refactor-analyze`/`callers`/`dependencies`/`impact` falharem em qualquer app Laravel real (`routes/*.php`, `bootstrap/app.php`, migrations).
 - `CodebaseIndexer` converte falhas de leitura ou de análise de um único arquivo em diagnóstico (`Analysis failed: …`) em vez de abortar o índice inteiro.
 - Funções nomeadas declaradas dentro de métodos ganham escopo local próprio e deixam de sobrescrever os tipos locais do método que as declara.
+- `agent-kit.logging.log_tool_calls` e `log_messages` passam a ler `AGENT_LOG_TOOL_CALLS` e `AGENT_LOG_MESSAGES`, como o `.env.example` já anunciava.
+- `cli_fallback` de `find_callers` e `impact` em `describeCapabilities()`/`refactoring_capabilities` passa a usar a forma `"<class>[::<method>]"` em vez da opção `--method=` (depreciada).
 
 ### Alterado
 - `GeminiProvider` e `GeminiEmbedder` passam a enviar a chave de API no header `x-goog-api-key` em vez da query string `?key=`, evitando vazamento da credencial em logs de acesso, proxies e históricos de URL.

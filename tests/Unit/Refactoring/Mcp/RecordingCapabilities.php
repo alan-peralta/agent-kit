@@ -22,9 +22,9 @@ final class RecordingCapabilities implements RefactoringCapabilities
         return $this->record('describeCapabilities', [], 'capability_discovery', ['capabilities' => [
             ['name' => 'audit', 'targets' => ['project'], 'mcp_tool' => 'refactoring_audit', 'cli_fallback' => 'php artisan agent-kit:refactor-audit --json', 'json' => true],
             ['name' => 'analyze', 'targets' => ['file', 'class', 'method'], 'mcp_tool' => 'refactoring_analyze', 'cli_fallback' => 'php artisan agent-kit:refactor-analyze <target> --json', 'json' => true],
-            ['name' => 'find_callers', 'targets' => ['class', 'method'], 'mcp_tool' => 'refactoring_callers', 'cli_fallback' => 'php artisan agent-kit:refactor-callers <class> --method=<method> --json', 'json' => true],
+            ['name' => 'find_callers', 'targets' => ['class', 'method'], 'mcp_tool' => 'refactoring_callers', 'cli_fallback' => 'php artisan agent-kit:refactor-callers "<class>[::<method>]" --json', 'json' => true],
             ['name' => 'dependencies', 'targets' => ['class'], 'mcp_tool' => 'refactoring_dependencies', 'cli_fallback' => 'php artisan agent-kit:refactor-dependencies <class> --json', 'json' => true],
-            ['name' => 'impact', 'targets' => ['class', 'method'], 'mcp_tool' => 'refactoring_impact', 'cli_fallback' => 'php artisan agent-kit:refactor-impact <class> --method=<method> --json', 'json' => true],
+            ['name' => 'impact', 'targets' => ['class', 'method'], 'mcp_tool' => 'refactoring_impact', 'cli_fallback' => 'php artisan agent-kit:refactor-impact "<class>[::<method>]" --json', 'json' => true],
         ]]);
     }
 
