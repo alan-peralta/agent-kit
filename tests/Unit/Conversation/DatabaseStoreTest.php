@@ -8,7 +8,9 @@ use Peralta\AgentKit\Conversation\Drivers\DatabaseStore;
 use Peralta\AgentKit\DTOs\Message;
 use Peralta\AgentKit\DTOs\ToolCall;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('database')]
 class DatabaseStoreTest extends TestCase
 {
     protected function defineDatabaseMigrations()

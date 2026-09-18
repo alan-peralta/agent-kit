@@ -7,7 +7,9 @@ use Peralta\AgentKit\Events\ToolCallExecuted;
 use Peralta\AgentKit\Listeners\PersistMetricsListener;
 use Peralta\AgentKit\Models\AgentMetric;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('database')]
 class PersistMetricsListenerTest extends TestCase
 {
     protected function defineDatabaseMigrations()

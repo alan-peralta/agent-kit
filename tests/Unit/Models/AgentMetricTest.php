@@ -4,7 +4,9 @@ namespace Peralta\AgentKit\Tests\Unit\Models;
 
 use Peralta\AgentKit\Models\AgentMetric;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
+#[Group('database')]
 class AgentMetricTest extends TestCase
 {
     protected function defineDatabaseMigrations()

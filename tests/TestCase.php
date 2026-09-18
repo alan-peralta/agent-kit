@@ -2,6 +2,7 @@
 
 namespace Peralta\AgentKit\Tests;
 
+use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 use Peralta\AgentKit\AgentKitServiceProvider;
 
@@ -17,10 +18,16 @@ abstract class TestCase extends Orchestra
     protected function getEnvironmentSetUp($app): void
     {
         $app['config']->set('database.default', 'testing');
-        $app['config']->set('database.connections.testing', [
-            'driver' => 'sqlite',
-            'database' => ':memory:',
-            'prefix' => '',
-        ]);
+        $app['config']->set('database.connections.testing', TestDatabase::connection());
+    }
+
+    protected function tearDown(): void
+    {
+        // A server database outlives the test, unlike SQLite in memory: drop what the test created.
+        if (TestDatabase::usesServer() && $this->app !== null) {
+            Schema::dropAllTables();
+        }
+
+        parent::tearDown();
     }
 }
