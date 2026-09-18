@@ -87,6 +87,38 @@ class ProjectScannerTest extends TestCase
         }
     }
 
+    public function test_it_never_descends_into_an_excluded_directory(): void
+    {
+        if (DIRECTORY_SEPARATOR === '\\' || (function_exists('posix_geteuid') && posix_geteuid() === 0)) {
+            $this->markTestSkipped('Needs a filesystem that enforces directory permissions for this user.');
+        }
+
+        // An unreadable directory makes the traversal throw as soon as it is opened, so the
+        // scan only succeeds if excluded trees (one and two segments deep) are never entered.
+        $root = $this->fixtureRoot();
+        mkdir($root . '/app', 0777, true);
+        mkdir($root . '/vendor/locked', 0777, true);
+        mkdir($root . '/bootstrap/cache/locked', 0777, true);
+        file_put_contents($root . '/app/A.php', '<?php class A {}');
+        file_put_contents($root . '/bootstrap/app.php', '<?php return 1;');
+        chmod($root . '/vendor/locked', 0);
+        chmod($root . '/bootstrap/cache/locked', 0);
+
+        try {
+            $scanner = new ProjectScanner(new PhpFileAnalyzer(), ['vendor', 'bootstrap/cache']);
+            $normalizedRoot = realpath($root);
+
+            $this->assertSame([
+                $normalizedRoot . '/app/A.php',
+                $normalizedRoot . '/bootstrap/app.php',
+            ], $scanner->phpFiles($root));
+        } finally {
+            chmod($root . '/vendor/locked', 0777);
+            chmod($root . '/bootstrap/cache/locked', 0777);
+            $this->removeFixtureRoot($root);
+        }
+    }
+
     private function fixtureRoot(): string
     {
         return sys_get_temp_dir() . '/agent-kit-scan-' . bin2hex(random_bytes(6));
