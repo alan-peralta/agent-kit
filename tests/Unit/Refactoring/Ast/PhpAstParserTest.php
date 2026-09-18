@@ -11,6 +11,20 @@ use PHPUnit\Framework\TestCase;
 
 final class PhpAstParserTest extends TestCase
 {
+    public function test_construction_leaves_the_parser_to_the_first_parse(): void
+    {
+        // Resolving the refactoring services builds a PhpAstParser, and the audit must work
+        // without nikic/php-parser installed, so construction may not touch the package.
+        $parser = new PhpAstParser();
+        $property = new \ReflectionProperty(PhpAstParser::class, 'parser');
+
+        $this->assertNull($property->getValue($parser));
+
+        $parser->parse(dirname(__DIR__, 3) . '/Fixtures/Refactoring/Ast/PaymentService.php', 'PaymentService.php');
+
+        $this->assertNotNull($property->getValue($parser));
+    }
+
     public function test_it_extracts_normalized_declarations_members_and_types(): void
     {
         $file = dirname(__DIR__, 3) . '/Fixtures/Refactoring/Ast/PaymentService.php';
