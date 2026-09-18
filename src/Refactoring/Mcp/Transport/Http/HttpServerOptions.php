@@ -83,7 +83,7 @@ final readonly class HttpServerOptions
 
     public function bindUri(): string
     {
-        // React\Socket\SocketServer binds IP literals only; `localhost` (accepted above as loopback) is a name, not one.
+        // A TCP socket server binds IP literals only; `localhost` (accepted above as loopback) is a name, not one.
         $host = $this->host === 'localhost' ? '127.0.0.1' : $this->host;
         $host = str_contains($host, ':') && !str_starts_with($host, '[') ? "[{$host}]" : $host;
 

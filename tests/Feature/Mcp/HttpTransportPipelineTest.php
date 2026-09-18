@@ -5,15 +5,16 @@ namespace Peralta\AgentKit\Tests\Feature\Mcp;
 use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Psr7\ServerRequest;
 use Mcp\Server;
+use Mcp\Server\Session\InMemorySessionStore;
 use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\BoundedInMemorySessionStore;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpServerOptions;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportFactory;
 use Peralta\AgentKit\Tests\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\NullLogger;
+use Symfony\Component\Uid\Uuid;
 
 final class HttpTransportPipelineTest extends TestCase
 {
@@ -22,12 +23,12 @@ final class HttpTransportPipelineTest extends TestCase
 
     private Server $server;
     private HttpTransportFactory $factory;
-    private BoundedInMemorySessionStore $sessions;
+    private InMemorySessionStore $sessions;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->sessions = new BoundedInMemorySessionStore(3600, 100);
+        $this->sessions = new InMemorySessionStore(3600);
         $this->server = $this->app->make(McpServerFactory::class)->create(
             McpProjectRoot::fromPath(dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast'),
             new NullLogger(),
@@ -162,7 +163,7 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertSame(400, $this->send('DELETE', $this->auth())->getStatusCode());
         self::assertSame(200, $this->send('DELETE', $this->auth(['Mcp-Session-Id' => $session]))->getStatusCode());
         self::assertSame(404, $this->send('POST', $this->auth(['Mcp-Session-Id' => $session]), $this->request(2, 'tools/list'))->getStatusCode());
-        self::assertSame(0, $this->sessions->count());
+        self::assertFalse($this->sessions->exists(Uuid::fromString($session)));
     }
 
     public function test_invalid_json_is_a_parse_error_and_batches_are_answered_in_one_body(): void

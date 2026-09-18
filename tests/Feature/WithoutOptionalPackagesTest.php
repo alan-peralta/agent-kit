@@ -25,7 +25,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[CoversNothing]
 final class WithoutOptionalPackagesTest extends TestCase
 {
-    /** mcp/sdk and what it pulls in, nikic/php-parser, and the optional react/http. */
+    /** mcp/sdk and what it pulls in, and nikic/php-parser. */
     private const HIDDEN_NAMESPACES = [
         'Mcp\\',
         'Opis\\',
@@ -36,7 +36,6 @@ final class WithoutOptionalPackagesTest extends TestCase
         'Webmozart\\Assert\\',
         'Doctrine\\Deprecations\\',
         'PhpParser\\',
-        'React\\',
     ];
 
     private const AST_MESSAGE = 'The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser. Install it with: composer require --dev nikic/php-parser';

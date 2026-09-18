@@ -38,7 +38,6 @@ final class ComposerManifestTest extends TestCase
             'php-http/discovery',
             'psr/http-server-handler',
             'psr/http-server-middleware',
-            'react/http',
         ] as $package) {
             self::assertNotContains($package, $production, "{$package} would be installed with --no-dev.");
         }

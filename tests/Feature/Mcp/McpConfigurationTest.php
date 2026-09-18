@@ -33,7 +33,6 @@ final class McpConfigurationTest extends TestCase
     public function test_the_sdk_is_installed(): void
     {
         self::assertTrue(class_exists(\Mcp\Server::class));
-        self::assertTrue(class_exists(\React\Http\HttpServer::class), 'react/http must be a dev dependency so the HTTP listener is tested.');
     }
 
     public function test_the_package_default_for_the_index_cache_path_is_null(): void
