@@ -9,6 +9,7 @@ use GuzzleHttp\Psr7\Response;
 use Illuminate\Support\Facades\Artisan;
 use Peralta\AgentKit\Agent;
 use Peralta\AgentKit\Tests\TestCase;
+use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
@@ -17,8 +18,11 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * (issue #11). They cannot be uninstalled here, since PHPUnit itself needs nikic/php-parser, so
  * each test runs in a fresh process whose Composer autoloader refuses their namespaces before
  * the application boots: class_exists() then answers false exactly as if they were missing.
+ * Coverage analysis itself needs nikic/php-parser, which this test hides, so it is marked
+ * #[CoversNothing] to keep it passing when a coverage driver (pcov, Xdebug) is loaded.
  */
 #[RunTestsInSeparateProcesses]
+#[CoversNothing]
 final class WithoutOptionalPackagesTest extends TestCase
 {
     /** mcp/sdk and what it pulls in, nikic/php-parser, and the optional react/http. */
