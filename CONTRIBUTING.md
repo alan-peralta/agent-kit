@@ -68,6 +68,10 @@ Com um servidor configurado, o `TestCase` apaga todas as tabelas do banco ao fim
 cada teste. Use um banco dedicado aos testes, nunca o da sua aplicação. O driver
 `mariadb` exige Laravel 11 ou superior.
 
+O CI (`.github/workflows/tests.yml`) roda a suíte completa em SQLite e o grupo
+`database` em MySQL 8.4, MariaDB 11.8 e PostgreSQL 17 com pgvector a cada push na
+`main` e em todo pull request.
+
 ## Padrões de código
 
 - PSR-4 (`Peralta\AgentKit\` → `src/`, `Peralta\AgentKit\Tests\` → `tests/`).
