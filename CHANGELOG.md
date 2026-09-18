@@ -16,8 +16,13 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - A migration do `knowledge_chunks` para pgvector saiu da tag `agent-kit-migrations` e passou para `agent-kit-pgvector-migrations`. O `php artisan migrate` deixa de exigir PostgreSQL com pgvector de quem usa MySQL, MariaDB, SQLite ou Qdrant. Instalações novas com pgvector publicam as duas tags. Quem usa MySQL, MariaDB, SQLite ou Qdrant e já publicou as migrations deve apagar do app o arquivo `2026_05_05_000002_create_knowledge_chunks_table.php`, se ele ainda não rodou; veja "Atualizando" no README.
 - **BREAKING** para quem usa o servidor MCP ou os comandos de AST do Refactoring Agent: `mcp/sdk` e `nikic/php-parser` passaram de `require` para `suggest` (#11). Instalar o pacote só pelo núcleo de agentes deixa de trazer o SDK e suas dependências, entre elas o plugin do Composer `php-http/discovery`, e de impor uma versão do `nikic/php-parser`. Quem usa `agent-kit:mcp` ou `refactor-analyze`, `-callers`, `-dependencies` e `-impact` deve rodar `composer require --dev mcp/sdk nikic/php-parser` ao atualizar. Sem eles, o `agent-kit:mcp` sai com código 1 e o comando de instalação, e os comandos de AST e as tools MCP correspondentes respondem com o novo código de erro `DEPENDENCY_MISSING`; `refactor-audit` e `refactor-capabilities` continuam funcionando. O `nikic/php-parser` aceito passa a ser qualquer 5.x (antes `^5.8`), e o `mcp/sdk` continua limitado a `^0.8.1` por uma regra `conflict`.
 
+- O Refactoring Agent passa a ignorar por padrão `.claude` e `.worktrees`, onde agentes de código mantêm worktrees completas do projeto, com `vendor`. Antes, cada classe aparecia duplicada como declaração ambígua e a varredura percorria as cópias inteiras. Quem publicou o `config/agent-kit.php` deve acrescentar as duas pastas a `refactoring.exclude`; veja "Atualizando" no README.
+
 ### Removido
 - Exigência da extensão `ext-fileinfo`, que só existia por causa do `mcp/sdk`; o SDK continua exigindo-a de quem o instala (#11).
+
+### Corrigido
+- O scanner do Refactoring Agent deixa de entrar nas pastas excluídas. Antes ele percorria todos os arquivos e só descartava os excluídos no fim. Num app Laravel com cerca de 2.300 arquivos PHP próprios e 314 mil em worktrees aninhadas, o fingerprint caiu de cerca de 16 s para 0,1–0,3 s e a montagem do índice AST de cerca de 22 s para 4,5 s.
 
 ## [0.3.0] - 2026-09-18
 
