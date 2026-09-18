@@ -87,6 +87,8 @@ composer require --dev mcp/sdk nikic/php-parser
 
 Sem eles, o `agent-kit:mcp` sai com `The MCP server requires mcp/sdk` e os comandos de AST
 respondem com o código de erro `DEPENDENCY_MISSING`, sempre com o comando de instalação.
+O SDK traz o plugin do Composer `php-http/discovery`, que o kit não usa; veja em
+[MCP_SERVER.md](MCP_SERVER.md#prerequisites) como recusá-lo antes do `require`.
 
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
 `response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
