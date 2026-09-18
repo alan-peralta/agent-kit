@@ -853,7 +853,7 @@ PHP));
         $this->assertSame('Fixtures\\Payments\\PaymentService', $result->data['target']);
         $this->assertSame(
             [['file' => 'LogsPayments.php', 'line' => 1, 'message' => 'Analysis failed: RuntimeException: boom']],
-            $result->diagnostics,
+            $result->toArray()['diagnostics'],
         );
         $this->assertTrue($result->incomplete());
     }
