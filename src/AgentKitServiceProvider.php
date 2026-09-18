@@ -91,6 +91,11 @@ class AgentKitServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // The MCP HTTP transport is a route of the host application, registered only when enabled.
+        if (config('agent-kit.mcp.enabled', true) && config('agent-kit.mcp.http.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/mcp.php');
+        }
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__ . '/../config/agent-kit.php' => config_path('agent-kit.php'),
