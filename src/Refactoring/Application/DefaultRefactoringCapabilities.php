@@ -138,7 +138,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         return new CapabilityResult(
             'analyze',
             $data,
-            array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics()),
+            $index->diagnostics(),
             $index->unresolvedReferences(),
         );
     }
@@ -157,7 +157,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         return new CapabilityResult(
             'find_callers',
             $data,
-            array_map(fn ($diagnostic) => $diagnostic->toArray(), $result->diagnostics),
+            $result->diagnostics,
             $result->unresolved,
         );
     }
@@ -181,7 +181,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             'upstream_dependencies' => $this->edges($index->findDependencies($symbol->fqcn)),
             'downstream_dependents' => $this->edges($index->findReferencesTo($symbol->fqcn)),
             'transitive_dependents' => $index->graph()->transitiveDependents($symbol->fqcn),
-        ], array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics()), $index->unresolvedReferences());
+        ], $index->diagnostics(), $index->unresolvedReferences());
     }
 
     public function impact(string $projectRoot, string $target): CapabilityResult
@@ -198,7 +198,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         return new CapabilityResult(
             'impact',
             $data,
-            array_map(fn ($diagnostic) => $diagnostic->toArray(), $result->diagnostics),
+            $result->diagnostics,
             $index->unresolvedReferences(),
         );
     }
