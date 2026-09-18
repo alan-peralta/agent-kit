@@ -2,8 +2,10 @@
 
 namespace Peralta\AgentKit;
 
+use Composer\InstalledVersions;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use OutOfBoundsException;
 use Peralta\AgentKit\ErrorRecovery\Classifiers\DefaultErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Contracts\AlertNotifier;
 use Peralta\AgentKit\ErrorRecovery\Middleware\DiscordAlertMiddleware;
@@ -47,6 +49,7 @@ use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CachedCodebaseIndexer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\IndexSnapshotStore;
 use Peralta\AgentKit\Refactoring\Analysis\Index\ProjectFingerprint;
 use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
@@ -67,7 +70,6 @@ use Peralta\AgentKit\Refactoring\Mcp\Commands\McpServeCommand;
 use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\RefactoringToolCatalog;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\ReactHttpListener;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\StdioServerRunner;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
@@ -91,6 +93,11 @@ class AgentKitServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // The MCP HTTP transport is a route of the host application, registered only when enabled.
+        if (config('agent-kit.mcp.enabled', true) && config('agent-kit.mcp.http.enabled', false)) {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/mcp.php');
+        }
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__ . '/../config/agent-kit.php' => config_path('agent-kit.php'),
@@ -304,11 +311,21 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(ProjectScanner::class),
         ));
         // One cache per process: the MCP server keeps it for its whole life, the CLI for one command.
-        $this->app->singleton(CachedCodebaseIndexer::class, fn ($app) => new CachedCodebaseIndexer(
-            $app->make(CodebaseIndexer::class),
-            $app->make(ProjectFingerprint::class),
-            max(1, (int) config('agent-kit.mcp.index_cache.max_entries', 1)),
-        ));
+        $this->app->singleton(CachedCodebaseIndexer::class, function ($app) {
+            // false disables the snapshot; null or an empty value (as .env.example ships it) is the default directory.
+            $path = config('agent-kit.mcp.index_cache.path');
+            $snapshots = $path === false ? null : new IndexSnapshotStore(
+                is_string($path) && $path !== '' ? $path : storage_path('framework/cache/agent-kit/index'),
+                $this->indexSnapshotContext(),
+            );
+
+            return new CachedCodebaseIndexer(
+                $app->make(CodebaseIndexer::class),
+                $app->make(ProjectFingerprint::class),
+                max(1, (int) config('agent-kit.mcp.index_cache.max_entries', 1)),
+                $snapshots,
+            );
+        });
         $this->app->bind(CodebaseIndexBuilder::class, fn ($app) => $app->make(CachedCodebaseIndexer::class));
         $this->app->singleton(CallerAnalyzer::class);
         $this->app->bind(ImpactAnalyzer::class, fn () => new ImpactAnalyzer(
@@ -338,6 +355,22 @@ class AgentKitServiceProvider extends ServiceProvider
         ));
     }
 
+    /** Everything besides the analysed files that shapes the index, so a change invalidates old snapshots. */
+    private function indexSnapshotContext(): string
+    {
+        try {
+            $package = InstalledVersions::getReference('peralta/agent-kit') ?? InstalledVersions::getPrettyVersion('peralta/agent-kit') ?? 'dev';
+        } catch (OutOfBoundsException) {
+            $package = 'dev';
+        }
+
+        return (string) json_encode([
+            'facades' => config('agent-kit.refactoring.facades', ['Illuminate\\Support\\Facades\\']),
+            'agent-kit' => $package,
+            'php-parser' => InstalledVersions::isInstalled('nikic/php-parser') ? InstalledVersions::getPrettyVersion('nikic/php-parser') : null,
+        ]);
+    }
+
     protected function registerAnalytics(): void
     {
         Event::listen(TokenUsageRecorded::class, LogUsageListener::class);
@@ -354,10 +387,6 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(RefactoringToolCatalog::class),
         ));
         $this->app->bind(StdioServerRunner::class, fn ($app) => new StdioServerRunner(
-            $app->make(McpServerFactory::class),
-            $app->make(CachedCodebaseIndexer::class),
-        ));
-        $this->app->bind(ReactHttpListener::class, fn ($app) => new ReactHttpListener(
             $app->make(McpServerFactory::class),
             $app->make(CachedCodebaseIndexer::class),
         ));

@@ -14,8 +14,18 @@ concurrency:
 
 jobs:
   suite:
-    name: Suite (SQLite)
+    name: Suite (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The lock: Laravel 12 with Testbench 10.
+          - name: SQLite
+            composer: install
+          # Every dependency at the newest version composer.json allows, on Laravel 13 with Guzzle 8.
+          - name: Laravel 13, Guzzle 8
+            composer: update --with laravel/framework:^13.0 --with orchestra/testbench:^11.0 --with guzzlehttp/guzzle:^8.0
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +36,13 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist
+        run: composer ${{ matrix.composer }} --no-interaction --no-progress --prefer-dist
+
+      - name: Show the resolved Laravel version
+        run: composer show laravel/framework | grep '^versions'
+
+      - name: Show the resolved Guzzle version
+        run: composer show guzzlehttp/guzzle | grep '^versions'
 
       - name: Run the suite
         run: vendor/bin/phpunit --colors=never --no-coverage

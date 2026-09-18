@@ -95,6 +95,22 @@ onde agentes de código guardam worktrees completas do projeto. Se você publico
 `config/agent-kit.php`, acrescente as duas pastas a `refactoring.exclude`: a lista publicada
 substitui a do pacote.
 
+Vindo da v0.3.x ou anterior: quem usava o transporte HTTP do servidor MCP
+(`agent-kit:mcp --transport=http`) precisa migrar para a rota da própria aplicação.
+Habilite `AGENT_KIT_MCP_HTTP_ENABLED=true` e um `AGENT_KIT_MCP_BEARER_TOKEN` no `.env`,
+sirva a aplicação como sempre (`php artisan serve`, PHP-FPM ou Octane) e aponte o cliente
+para `<APP_URL><AGENT_KIT_MCP_HTTP_PATH>` (por exemplo, `http://127.0.0.1:8000/mcp` com
+`php artisan serve`) em vez do antigo `--host`/`--port`. Remova do `.env` as variáveis
+`AGENT_KIT_MCP_HTTP_HOST`, `AGENT_KIT_MCP_HTTP_PORT`, `AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT`,
+`AGENT_KIT_MCP_HTTP_MAX_CONCURRENT` e `AGENT_KIT_MCP_HTTP_MAX_SESSIONS`, que não existem
+mais; `react/http` deixou de ser necessário. `agent-kit:mcp --transport=http` agora sai
+com uma mensagem explicando a mudança em vez de tentar escutar. Duas variáveis mudam de
+sentido: `AGENT_KIT_MCP_ALLOW_REMOTE=true` agora faz a rota aceitar clientes com IP fora
+de loopback (antes permitia fazer o bind do processo num endereço fora de loopback), e
+`AGENT_KIT_MCP_HTTP_ENABLED=true` registra a rota em todo ambiente que lê esse `.env`, não
+só no processo que você iniciava à mão; habilite-a apenas no `.env` de desenvolvimento. Veja
+[MCP_SERVER.md](MCP_SERVER.md#streamable-http).
+
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
 `response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
 (`composer require peralta/agent-kit:^0.3`). Nenhuma config nova para republicar e
@@ -524,10 +540,20 @@ Streamable HTTP:
 ```bash
 # stdio (padrão) — use em .mcp.json / .cursor/mcp.json / ~/.codex/config.toml
 php artisan agent-kit:mcp --path=/caminho/absoluto/do/projeto
+```
 
-# Streamable HTTP — opt-in, bind em 127.0.0.1, bearer token obrigatório
-AGENT_KIT_MCP_HTTP_ENABLED=true AGENT_KIT_MCP_BEARER_TOKEN=... \
-php artisan agent-kit:mcp --transport=http --path=/caminho/absoluto/do/projeto --port=8787
+Streamable HTTP não é um processo à parte: é uma rota da própria aplicação Laravel,
+opt-in, loopback por padrão e sempre com bearer token.
+
+```env
+# .env
+AGENT_KIT_MCP_HTTP_ENABLED=true
+AGENT_KIT_MCP_BEARER_TOKEN=... # 32+ caracteres
+```
+
+```bash
+php artisan serve
+# endpoint: <APP_URL><AGENT_KIT_MCP_HTTP_PATH>, ex.: http://127.0.0.1:8000/mcp
 ```
 
 O servidor usa pacotes que a instalação padrão não traz. Instale-os em desenvolvimento

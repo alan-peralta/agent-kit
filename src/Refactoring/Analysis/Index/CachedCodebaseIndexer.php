@@ -14,6 +14,7 @@ final class CachedCodebaseIndexer implements CodebaseIndexBuilder
         private readonly CodebaseIndexBuilder $inner,
         private readonly ProjectFingerprint $fingerprint,
         private readonly int $maxEntries = 1,
+        private readonly ?IndexSnapshotStore $snapshots = null,
     ) {
         if ($maxEntries < 1) {
             throw new InvalidArgumentException('The index cache must keep at least one entry.');
@@ -33,7 +34,12 @@ final class CachedCodebaseIndexer implements CodebaseIndexBuilder
             return $entry['index'];
         }
 
-        $index = $this->inner->build($key);
+        $index = $this->snapshots?->read($key, $fingerprint);
+        if ($index === null) {
+            $index = $this->inner->build($key);
+            $this->snapshots?->write($key, $fingerprint, $index);
+        }
+
         unset($this->entries[$key]);
         $this->entries[$key] = ['fingerprint' => $fingerprint, 'index' => $index];
 

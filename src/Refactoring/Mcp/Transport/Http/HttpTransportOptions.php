@@ -4,11 +4,10 @@ namespace Peralta\AgentKit\Refactoring\Mcp\Transport\Http;
 
 use Peralta\AgentKit\Refactoring\Mcp\McpConfigurationException;
 
-final readonly class HttpServerOptions
+final readonly class HttpTransportOptions
 {
     public const MIN_TOKEN_LENGTH = 32;
 
-    private const LOOPBACK_HOSTS = ['127.0.0.1', '::1', '[::1]', 'localhost'];
     private const DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
     /**
@@ -16,35 +15,24 @@ final readonly class HttpServerOptions
      * @param  list<string>  $allowedOrigins  full origins CORS answers with, empty = no Access-Control-Allow-Origin
      */
     private function __construct(
-        public string $host,
-        public int $port,
         public string $path,
         public bool $allowRemote,
         public array $allowedHosts,
         public array $allowedOrigins,
         public string $bearerToken,
         public int $maxBodyBytes,
-        public int $idleTimeout,
-        public int $maxConcurrentRequests,
         public int $sessionTtl,
-        public int $maxSessions,
+        public ?string $cacheStore,
+        public int $timeLimit,
     ) {}
 
-    /** @param array<string, mixed> $config the agent-kit.mcp.http array */
-    public static function fromConfig(array $config, ?string $host = null, ?int $port = null, bool $allowRemote = false): self
+    /**
+     * @param  array<string, mixed>  $config  the agent-kit.mcp.http array
+     * @param  string  $appUrl  the host application's own URL (config('app.url')); its host is
+     *                           always allowed, but never becomes a CORS origin on its own
+     */
+    public static function fromConfig(array $config, string $appUrl = ''): self
     {
-        if (!($config['enabled'] ?? false)) {
-            throw new McpConfigurationException('The MCP HTTP transport is disabled. Set AGENT_KIT_MCP_HTTP_ENABLED=true to enable it.');
-        }
-
-        $host = self::hostOf((string) ($host ?? $config['host'] ?? '127.0.0.1'));
-        $allowRemote = $allowRemote || (bool) ($config['allow_remote'] ?? false);
-        if (!in_array($host, self::LOOPBACK_HOSTS, true) && !$allowRemote) {
-            throw new McpConfigurationException(
-                "Refusing to bind the MCP HTTP transport to {$host}: pass --allow-remote (or set AGENT_KIT_MCP_ALLOW_REMOTE=true) to expose it beyond loopback.",
-            );
-        }
-
         $token = (string) ($config['bearer_token'] ?? '');
         if (strlen($token) < self::MIN_TOKEN_LENGTH) {
             throw new McpConfigurationException(
@@ -52,42 +40,41 @@ final readonly class HttpServerOptions
             );
         }
 
-        $port = $port ?? (int) ($config['port'] ?? 8787);
-        if ($port < 1 || $port > 65535) {
-            throw new McpConfigurationException("The MCP HTTP port must be between 1 and 65535, got {$port}.");
+        $timeLimit = (int) ($config['time_limit'] ?? 120);
+        if ($timeLimit < 0) {
+            throw new McpConfigurationException("AGENT_KIT_MCP_HTTP_TIME_LIMIT must be zero or a positive integer, got {$timeLimit}.");
         }
 
         $allowedHosts = array_values(array_unique(array_merge(
             self::DEFAULT_ALLOWED_HOSTS,
+            self::parseAllowedOrigins($appUrl),
             self::parseAllowedOrigins((string) ($config['allowed_origins'] ?? '')),
-            $allowRemote ? [$host] : [],
         )));
 
+        $cacheStore = trim((string) ($config['cache_store'] ?? ''));
+
         return new self(
-            host: $host,
-            port: $port,
-            // trim() on both ends, so '/mcp/', 'mcp' and '/mcp' all normalise to '/mcp' and the
-            // bare root '/' stays '/' - the endpoint comparison in HttpTransportFactory is exact.
-            path: '/' . trim((string) ($config['path'] ?? '/mcp'), '/'),
-            allowRemote: $allowRemote,
+            // '/mcp/', 'mcp' and '/mcp' all normalise to '/mcp'; an empty or root-only path
+            // (an unset AGENT_KIT_MCP_HTTP_PATH, or one trimmed down to nothing) also falls back
+            // to '/mcp' rather than mounting the transport on the host application's site root.
+            path: self::normalizePath((string) ($config['path'] ?? '/mcp')),
+            allowRemote: (bool) ($config['allow_remote'] ?? false),
             allowedHosts: $allowedHosts,
             allowedOrigins: self::parseOrigins((string) ($config['allowed_origins'] ?? '')),
             bearerToken: $token,
             maxBodyBytes: self::positive($config, 'max_body_bytes', 'AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES'),
-            idleTimeout: self::positive($config, 'idle_timeout', 'AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT'),
-            maxConcurrentRequests: self::positive($config, 'max_concurrent_requests', 'AGENT_KIT_MCP_HTTP_MAX_CONCURRENT'),
             sessionTtl: self::positive($config, 'session_ttl', 'AGENT_KIT_MCP_HTTP_SESSION_TTL'),
-            maxSessions: self::positive($config, 'max_sessions', 'AGENT_KIT_MCP_HTTP_MAX_SESSIONS'),
+            cacheStore: $cacheStore === '' ? null : $cacheStore,
+            timeLimit: $timeLimit,
         );
     }
 
-    public function bindUri(): string
+    public static function normalizePath(string $path): string
     {
-        // React\Socket\SocketServer binds IP literals only; `localhost` (accepted above as loopback) is a name, not one.
-        $host = $this->host === 'localhost' ? '127.0.0.1' : $this->host;
-        $host = str_contains($host, ':') && !str_starts_with($host, '[') ? "[{$host}]" : $host;
+        $trimmed = trim($path, '/');
 
-        return $host . ':' . $this->port;
+        // An empty result ('', '/' or '//') must not mount the transport on the site root.
+        return $trimmed === '' ? '/mcp' : '/' . $trimmed;
     }
 
     /** @return list<string> lower-cased hosts, ports and schemes stripped, IPv6 kept bracketed */

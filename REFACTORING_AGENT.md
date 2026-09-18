@@ -110,8 +110,9 @@ The generated instructions gather evidence in this order:
 3. Repository search plus source and test reading for missing context.
 4. LLM inference for interpretation only, never for invented relationships.
 
-Start the MCP server with `php artisan agent-kit:mcp --path=/project` (stdio)
-or `--transport=http` for Streamable HTTP; see [MCP_SERVER.md](MCP_SERVER.md).
+Start the MCP server with `php artisan agent-kit:mcp --path=/project` (stdio),
+or enable the Streamable HTTP route that your application serves at `/mcp`
+(`AGENT_KIT_MCP_HTTP_ENABLED=true`); see [MCP_SERVER.md](MCP_SERVER.md).
 The direct CLI remains the deterministic fallback, for example:
 
 ```bash

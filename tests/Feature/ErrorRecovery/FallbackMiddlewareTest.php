@@ -134,7 +134,7 @@ class FallbackMiddlewareTest extends TestCase
     {
         $request = new \GuzzleHttp\Psr7\Request('POST', 'https://api.openai.com/v1/chat/completions');
         $response = new \GuzzleHttp\Psr7\Response(400, [], '{"error":"bad"}');
-        $previous = new \GuzzleHttp\Exception\RequestException('bad request', $request, $response);
+        $previous = \GuzzleHttp\Exception\RequestException::create($request, $response);
         return new ProviderException('Erro chamando openai: bad request', 0, $previous);
     }
 

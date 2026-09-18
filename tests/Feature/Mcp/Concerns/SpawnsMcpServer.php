@@ -37,7 +37,9 @@ trait SpawnsMcpServer
             }
         }
 
-        return array_merge($environment, ['APP_ENV' => 'testing'], $overrides);
+        // No subprocess may read or write index snapshots in the Testbench skeleton's storage, including
+        // the SDK client's server, which is started without spawn() and so without the fixture .env.
+        return array_merge($environment, ['APP_ENV' => 'testing', 'AGENT_KIT_MCP_INDEX_CACHE_PATH' => 'false'], $overrides);
     }
 
     /**

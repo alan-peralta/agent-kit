@@ -8,8 +8,7 @@ use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Mcp\McpConfigurationException;
 use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpServerOptions;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\ReactHttpListener;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportOptions;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\StdioServerRunner;
 use Psr\Log\LoggerInterface;
 
@@ -17,14 +16,11 @@ final class McpServeCommand extends Command
 {
     protected $signature = 'agent-kit:mcp
         {--transport= : stdio or http; defaults to agent-kit.mcp.transport}
-        {--path= : Project root to analyze; defaults to agent-kit.mcp.project_root or the Laravel base path}
-        {--host= : HTTP bind host; defaults to agent-kit.mcp.http.host (127.0.0.1)}
-        {--port= : HTTP bind port; defaults to agent-kit.mcp.http.port (8787)}
-        {--allow-remote : Allow the HTTP transport to bind a non-loopback interface (a bearer token is still required)}';
+        {--path= : Project root to analyze; defaults to agent-kit.mcp.project_root or the Laravel base path}';
 
-    protected $description = 'Serve the Agent Kit refactoring capabilities to MCP clients (stdio or Streamable HTTP)';
+    protected $description = 'Serve the Agent Kit refactoring capabilities to MCP clients over stdio (Streamable HTTP is an application route)';
 
-    public function handle(StdioServerRunner $stdio, ReactHttpListener $http, McpLoggerFactory $loggers): int
+    public function handle(StdioServerRunner $stdio, McpLoggerFactory $loggers): int
     {
         $config = (array) config('agent-kit.mcp', []);
         if (!($config['enabled'] ?? true)) {
@@ -47,7 +43,7 @@ final class McpServeCommand extends Command
 
             return match ($transport) {
                 'stdio' => $this->serveStdio($stdio, $root, $logger),
-                'http' => $http->listen($this->httpOptions((array) ($config['http'] ?? [])), $root, $logger),
+                'http' => $this->refuse($this->httpUnavailableMessage((array) ($config['http'] ?? []))),
                 default => $this->refuse("Unsupported MCP transport: {$transport}. Use stdio or http."),
             };
         } catch (McpConfigurationException|MissingDependencyException $exception) {
@@ -63,21 +59,17 @@ final class McpServeCommand extends Command
         return $stdio->run($root, $logger, fopen('php://stdin', 'r'), fopen('php://stdout', 'w'));
     }
 
-    private function httpOptions(array $config): HttpServerOptions
+    /**
+     * The Streamable HTTP transport is now served by a route of the host application, not by
+     * this command: the ReactPHP HTTP server this used to run on cannot coexist with Guzzle 8,
+     * which the rest of the package depends on. Point the operator at the route instead of
+     * trying to listen here.
+     */
+    private function httpUnavailableMessage(array $config): string
     {
-        $port = $this->option('port');
-        // A typo such as --port=80o80 used to cast to 80 (or be dropped entirely) and the server
-        // would quietly listen somewhere the user never asked for; refuse it instead.
-        if ($port !== null && !ctype_digit((string) $port)) {
-            throw new McpConfigurationException("The --port option must be an integer between 1 and 65535, got {$port}.");
-        }
+        $path = HttpTransportOptions::normalizePath((string) ($config['path'] ?? '/mcp'));
 
-        return HttpServerOptions::fromConfig(
-            $config,
-            host: $this->option('host') ?: null,
-            port: $port === null ? null : (int) $port,
-            allowRemote: (bool) $this->option('allow-remote'),
-        );
+        return "The Streamable HTTP transport is served by your application at {$path} when AGENT_KIT_MCP_HTTP_ENABLED=true; start it with php artisan serve or your web server. See MCP_SERVER.md.";
     }
 
     // Not named fail(): Laravel 11+ Command::fail() exists and throws.

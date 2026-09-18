@@ -19,6 +19,9 @@ abstract class TestCase extends Orchestra
     {
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', TestDatabase::connection());
+        // Never share index snapshots between tests: a fake parser in one test must not feed
+        // another. Tests that exercise IndexSnapshotStore pass a temp directory explicitly.
+        $app['config']->set('agent-kit.mcp.index_cache.path', false);
     }
 
     protected function tearDown(): void

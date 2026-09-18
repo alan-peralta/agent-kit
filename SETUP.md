@@ -4,7 +4,7 @@ Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (K
 
 ## ✅ Pré-requisitos
 
-- Laravel 10+ (suporta 10, 11, 12)
+- Laravel 10+ (suporta 10, 11, 12 e 13; o 13 exige PHP 8.3)
 - PHP 8.2+
 - PostgreSQL com extensão pgvector, ou MySQL/MariaDB com o store `database` ou Qdrant
 - Redis
@@ -78,7 +78,7 @@ AGENT_KIT_ANALYTICS_PERSIST=false
 # Servidor MCP (opcional - Claude Code, Cursor, Codex, Inspector)
 AGENT_KIT_MCP_ENABLED=true
 AGENT_KIT_MCP_HTTP_ENABLED=false
-# AGENT_KIT_MCP_BEARER_TOKEN=   # obrigatório só para --transport=http (32+ chars)
+# AGENT_KIT_MCP_BEARER_TOKEN=   # obrigatório só com AGENT_KIT_MCP_HTTP_ENABLED=true (32+ chars)
 ```
 
 > MySQL/MariaDB: use `AGENT_KNOWLEDGE_STORE=database` e deixe `AGENT_KNOWLEDGE_DB=` vazio
@@ -96,7 +96,7 @@ AGENT_KIT_MCP_HTTP_ENABLED=false
 ## 🗄️ Passo 3: Rodar as migrations
 
 > ⚠️ Com a tag `agent-kit-pgvector-migrations` publicada, este passo exige o PostgreSQL com pgvector **já rodando e configurado** como a
-> conexão `pgsql` (ou a de `AGENT_KNOWLEDGE_DB`). Num app Laravel 11/12 novo, que vem
+> conexão `pgsql` (ou a de `AGENT_KNOWLEDGE_DB`). Num app Laravel 11, 12 ou 13 novo, que vem
 > com `DB_CONNECTION=sqlite`, o comando falha com
 > `SQLSTATE[HY000]: General error: 1 near "EXTENSION": syntax error`.
 > A verificação do Passo 4 acontece depois da migration — confirme o banco antes.
@@ -453,7 +453,7 @@ tail -f storage/logs/laravel.log
 ### Servidor MCP não conecta?
 
 - stdio: rode `php artisan agent-kit:mcp --path=/projeto < /dev/null` e leia o stderr; erros de inicialização retornam código 1.
-- HTTP: confira `AGENT_KIT_MCP_HTTP_ENABLED=true`, `AGENT_KIT_MCP_BEARER_TOKEN` com 32+ caracteres e o header `Authorization: Bearer <token>`; `403` indica origin/host fora de `AGENT_KIT_MCP_ALLOWED_ORIGINS`.
+- HTTP: confira `AGENT_KIT_MCP_HTTP_ENABLED=true`, `AGENT_KIT_MCP_BEARER_TOKEN` com 32+ caracteres e o header `Authorization: Bearer <token>`; `403` indica origin/host fora de `AGENT_KIT_MCP_ALLOWED_ORIGINS` ou cliente fora de loopback (`AGENT_KIT_MCP_ALLOW_REMOTE`); `503` indica configuração inválida (veja o log da aplicação).
 - Detalhes em [MCP_SERVER.md](MCP_SERVER.md).
 
 ---
