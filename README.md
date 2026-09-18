@@ -20,6 +20,10 @@ php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
 ```
 
+Isso basta para o núcleo de agentes: providers, tools, conversas e RAG. O Refactoring Agent
+e o servidor MCP usam pacotes opcionais, instalados à parte e de preferência só em
+desenvolvimento; veja [Refactoring Agent](#refactoring-agent) e [Servidor MCP](#servidor-mcp).
+
 A tag `agent-kit-migrations` publica só as tabelas de conversas (`agent_messages`) e de
 métricas (`agent_kit_metrics`). Elas usam apenas tipos portáveis e são testadas no CI em
 MySQL 8.4, MariaDB 11.8, PostgreSQL 17 e SQLite.
@@ -69,6 +73,20 @@ Vindo da v0.3.x ou anterior: a migration do `knowledge_chunks` para pgvector sai
 - O store `database` funciona com um `config/agent-kit.php` publicado antes desta versão,
   usando a conexão padrão e a tabela `knowledge_chunks`. Para usar `AGENT_KNOWLEDGE_DB` ou
   outra tabela, copie o bloco `database` de `knowledge.stores` do config do pacote para o seu.
+
+Vindo da v0.3.x ou anterior: `mcp/sdk` e `nikic/php-parser` deixaram de ser dependências
+obrigatórias. Com eles saem da sua aplicação o plugin do Composer `php-http/discovery`, as
+dependências do SDK e a exigência de `ext-fileinfo`. Quem usa só o núcleo de agentes não
+precisa fazer nada. Quem usa o servidor MCP (`agent-kit:mcp`) ou os comandos de AST do
+Refactoring Agent (`refactor-analyze`, `-callers`, `-dependencies` e `-impact`) instala os
+dois depois de atualizar:
+
+```bash
+composer require --dev mcp/sdk nikic/php-parser
+```
+
+Sem eles, o `agent-kit:mcp` sai com `The MCP server requires mcp/sdk` e os comandos de AST
+respondem com o código de erro `DEPENDENCY_MISSING`, sempre com o comando de instalação.
 
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
 `response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
@@ -407,6 +425,18 @@ dependencies e impact usam `--path=/project` para outra raiz. Use `--json` para
 obter saída estruturada adequada a agentes e automações. Todos os comandos são
 somente de análise: nenhum deles modifica o código examinado.
 
+`refactor-capabilities` e `refactor-audit` funcionam com a instalação padrão. Analyze,
+callers, dependencies e impact montam o índice AST e precisam do `nikic/php-parser` 5.x,
+que o pacote só sugere. Em desenvolvimento ele costuma já estar presente por causa do
+PHPUnit; se não estiver:
+
+```bash
+composer require --dev nikic/php-parser
+```
+
+Sem ele, esses comandos respondem com o código de erro `DEPENDENCY_MISSING` e o comando de
+instalação.
+
 Os relatórios de auditoria são gravados em `.agent-kit/refactoring/`. Veja
 [REFACTORING_AGENT.md](REFACTORING_AGENT.md) para arquitetura, tipos de
 dependência, níveis de confiança, workflow e limitações.
@@ -491,6 +521,13 @@ php artisan agent-kit:mcp --path=/caminho/absoluto/do/projeto
 # Streamable HTTP — opt-in, bind em 127.0.0.1, bearer token obrigatório
 AGENT_KIT_MCP_HTTP_ENABLED=true AGENT_KIT_MCP_BEARER_TOKEN=... \
 php artisan agent-kit:mcp --transport=http --path=/caminho/absoluto/do/projeto --port=8787
+```
+
+O servidor usa pacotes que a instalação padrão não traz. Instale-os em desenvolvimento
+antes do primeiro uso:
+
+```bash
+composer require --dev mcp/sdk nikic/php-parser
 ```
 
 Configuração em `config/agent-kit.php` (`mcp`) e variáveis `AGENT_KIT_MCP_*`

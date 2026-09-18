@@ -28,6 +28,11 @@ php artisan vendor:publish --tag=agent-kit-pgvector-migrations
 > MySQL/MariaDB: troque a tag do pgvector por `agent-kit-database-store-migrations` para
 > usar o store `database`, ou não publique nenhuma tag de knowledge base se for usar Qdrant.
 
+> Refactoring Agent e servidor MCP: os comandos de AST (`refactor-analyze`, `-callers`,
+> `-dependencies` e `-impact`) e o `agent-kit:mcp` usam pacotes opcionais. Instale-os só em
+> desenvolvimento com `composer require --dev mcp/sdk nikic/php-parser`; veja
+> [MCP_SERVER.md](MCP_SERVER.md).
+
 Alternativa mais curta para um checkout local do pacote:
 
 ```bash
