@@ -18,6 +18,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Stores de conhecimento/vetores: `ArrayStore`, `DatabaseStore`, `RedisStore`, `HybridStore` e `QdrantStore`.
 - `ConversationManager`, DTOs (`AgentResponse`, `Message`, `Context`), `AbstractTool` e fachada `Agent`.
 - Cobertura de testes unitários e de integração para providers, stores, eventos, middlewares e componentes core, incluindo configuração de banco SQLite para testes.
+- Servidor MCP para o Refactoring Agent (`php artisan agent-kit:mcp`): seis tools somente-leitura (`refactoring_capabilities`, `refactoring_audit`, `refactoring_analyze`, `refactoring_callers`, `refactoring_dependencies`, `refactoring_impact`), resource `agent-kit://refactoring/capabilities`, transporte stdio e Streamable HTTP (opt-in, bind em loopback, bearer token, allowlist de origins, limites de corpo/concorrência/sessões), cache do índice AST por fingerprint de conteúdo e configuração `agent-kit.mcp`.
+- Dependência `mcp/sdk ^0.8.1`; `react/http` sugerido para o transporte HTTP.
 - Indexação de código procedural no Refactoring Agent: arquivos com código fora de classes (`routes/*.php`, `config/*.php`, `bootstrap/app.php`, helpers, migrations com classe anônima) geram um símbolo `script` identificado pelo caminho relativo à raiz; funções top-level são registradas como rotinas do script (`helpers.php::make_user` vira alvo de `refactor-analyze`) e caminhos de script são aceitos como alvo em `refactor-dependencies`, `refactor-callers` e `refactor-impact`.
 
 ### Corrigido
@@ -36,6 +38,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Limpeza da resolução e nomenclatura de providers em `Agent::send()`.
 - Substituição de chamadas diretas a `Log` por eventos e listeners de log.
 - Extração de helper compartilhado do Guzzle `MockHandler` para uma trait usada pelos testes de providers.
+- `describeCapabilities()` passa a informar `mcp_tool` em cada descritor; `agent-kit:refactor-capabilities` exibe a coluna MCP tool.
+- Skills de Cursor/Claude Code passam a nomear as tools MCP reais antes do fallback de CLI.
 - `ClassName::class` passa a gerar aresta `class_constant` (`metadata.constant = "class"`) e corpos de classes anônimas passam a contribuir referências atribuídas à rotina que os declara; como scripts agora contam como dependentes em `refactor-impact`/`refactor-callers`, o risco de classes referenciadas por rotas, config e migrations pode subir. `self::class`/`static::class` dentro da própria classe geram auto-arestas `class_constant` (mesma categoria de `self::CONST` e `$this->m()`), o que pode contar a classe como um dependente estrutural de si mesma. Alvos de função (`helpers.php::make_user`) respondem com `risk: UNKNOWN` e um diagnóstico, porque chamadas a funções não são indexadas; atributos de funções top-level geram arestas `attribute`.
 
 ### Documentação

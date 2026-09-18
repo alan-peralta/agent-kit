@@ -43,7 +43,10 @@ use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CachedCodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\ProjectFingerprint;
 use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
 use Peralta\AgentKit\Refactoring\Agents\AgentConfigurationInstaller;
@@ -59,6 +62,12 @@ use Peralta\AgentKit\Refactoring\Commands\RefactorCallersCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorCapabilitiesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorDependenciesCommand;
 use Peralta\AgentKit\Refactoring\Commands\RefactorImpactCommand;
+use Peralta\AgentKit\Refactoring\Mcp\Commands\McpServeCommand;
+use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
+use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
+use Peralta\AgentKit\Refactoring\Mcp\RefactoringToolCatalog;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\ReactHttpListener;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\StdioServerRunner;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
 use Peralta\AgentKit\Refactoring\Support\RefactoringReport;
@@ -76,6 +85,7 @@ class AgentKitServiceProvider extends ServiceProvider
         $this->registerAgent();
         $this->registerAnalytics();
         $this->registerRefactoring();
+        $this->registerMcp();
     }
 
     public function boot(): void
@@ -97,6 +107,7 @@ class AgentKitServiceProvider extends ServiceProvider
                 RefactorCallersCommand::class,
                 RefactorDependenciesCommand::class,
                 RefactorImpactCommand::class,
+                McpServeCommand::class,
             ]);
         }
     }
@@ -271,6 +282,16 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(ProjectScanner::class),
             $app->make(AstParser::class),
         ));
+        $this->app->singleton(ProjectFingerprint::class, fn ($app) => new ProjectFingerprint(
+            $app->make(ProjectScanner::class),
+        ));
+        // One cache per process: the MCP server keeps it for its whole life, the CLI for one command.
+        $this->app->singleton(CachedCodebaseIndexer::class, fn ($app) => new CachedCodebaseIndexer(
+            $app->make(CodebaseIndexer::class),
+            $app->make(ProjectFingerprint::class),
+            max(1, (int) config('agent-kit.mcp.index_cache.max_entries', 1)),
+        ));
+        $this->app->bind(CodebaseIndexBuilder::class, fn ($app) => $app->make(CachedCodebaseIndexer::class));
         $this->app->singleton(CallerAnalyzer::class);
         $this->app->bind(ImpactAnalyzer::class, fn () => new ImpactAnalyzer(
             config('agent-kit.refactoring.impact_thresholds', []),
@@ -279,7 +300,7 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(ProjectScanner::class),
             $app->make(PhpFileAnalyzer::class),
             $app->make(RefactoringReport::class),
-            $app->make(CodebaseIndexer::class),
+            $app->make(CodebaseIndexBuilder::class),
             $app->make(CallerAnalyzer::class),
             $app->make(ImpactAnalyzer::class),
         ));
@@ -304,5 +325,23 @@ class AgentKitServiceProvider extends ServiceProvider
         Event::listen(TokenUsageRecorded::class, LogUsageListener::class);
         Event::listen(ToolCallExecuted::class, LogToolCallListener::class);
         Event::listen(AgentKitEvent::class, PersistMetricsListener::class);
+    }
+
+    protected function registerMcp(): void
+    {
+        $this->app->singleton(RefactoringToolCatalog::class);
+        $this->app->singleton(McpLoggerFactory::class, fn ($app) => new McpLoggerFactory($app->make('log')));
+        $this->app->bind(McpServerFactory::class, fn ($app) => new McpServerFactory(
+            $app->make(RefactoringCapabilities::class),
+            $app->make(RefactoringToolCatalog::class),
+        ));
+        $this->app->bind(StdioServerRunner::class, fn ($app) => new StdioServerRunner(
+            $app->make(McpServerFactory::class),
+            $app->make(CachedCodebaseIndexer::class),
+        ));
+        $this->app->bind(ReactHttpListener::class, fn ($app) => new ReactHttpListener(
+            $app->make(McpServerFactory::class),
+            $app->make(CachedCodebaseIndexer::class),
+        ));
     }
 }

@@ -25,10 +25,11 @@ final class RefactorCapabilitiesCommand extends Command
         }
 
         $this->table(
-            ['Capability', 'Targets', 'CLI fallback', 'JSON'],
+            ['Capability', 'Targets', 'MCP tool', 'CLI fallback', 'JSON'],
             array_map(static fn (array $item): array => [
                 $item['name'],
                 implode(', ', $item['targets']),
+                $item['mcp_tool'],
                 $item['cli_fallback'],
                 $item['json'] ? 'yes' : 'no',
             ], $result->data['capabilities']),

@@ -8,7 +8,7 @@ use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParseDiagnostic;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndex;
-use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectRoot;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
@@ -20,7 +20,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         private readonly ProjectScanner $scanner,
         private readonly PhpFileAnalyzer $fileAnalyzer,
         private readonly RefactoringReport $report,
-        private readonly CodebaseIndexer $indexer,
+        private readonly CodebaseIndexBuilder $indexer,
         private readonly CallerAnalyzer $callers,
         private readonly ImpactAnalyzer $impactAnalyzer,
     ) {}
@@ -32,30 +32,35 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
                 [
                     'name' => 'audit',
                     'targets' => ['project'],
+                    'mcp_tool' => 'refactoring_audit',
                     'cli_fallback' => 'php artisan agent-kit:refactor-audit --json',
                     'json' => true,
                 ],
                 [
                     'name' => 'analyze',
                     'targets' => ['file', 'class', 'method'],
+                    'mcp_tool' => 'refactoring_analyze',
                     'cli_fallback' => 'php artisan agent-kit:refactor-analyze <target> --json',
                     'json' => true,
                 ],
                 [
                     'name' => 'find_callers',
                     'targets' => ['class', 'method'],
+                    'mcp_tool' => 'refactoring_callers',
                     'cli_fallback' => 'php artisan agent-kit:refactor-callers <class> --method=<method> --json',
                     'json' => true,
                 ],
                 [
                     'name' => 'dependencies',
                     'targets' => ['class'],
+                    'mcp_tool' => 'refactoring_dependencies',
                     'cli_fallback' => 'php artisan agent-kit:refactor-dependencies <class> --json',
                     'json' => true,
                 ],
                 [
                     'name' => 'impact',
                     'targets' => ['class', 'method'],
+                    'mcp_tool' => 'refactoring_impact',
                     'cli_fallback' => 'php artisan agent-kit:refactor-impact <class> --method=<method> --json',
                     'json' => true,
                 ],

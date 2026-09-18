@@ -1,6 +1,6 @@
 # Refactoring Audit
 
-Run `{{cli_audit}} --json` when an MCP audit capability is unavailable. Do not modify source files.
+Call the `refactoring_audit` MCP tool when the Agent Kit MCP server is available; otherwise run `{{cli_audit}} --json`. Do not modify source files.
 
 Use dependency and impact analysis for high-risk areas. Never recommend a pattern before identifying the concrete problem.
 

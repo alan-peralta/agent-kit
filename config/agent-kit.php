@@ -314,4 +314,48 @@ return [
         'persist' => env('AGENT_KIT_ANALYTICS_PERSIST', false),
         'table' => 'agent_kit_metrics',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | MCP Server (Refactoring Agent)
+    |--------------------------------------------------------------------------
+    | Expõe as capabilities de refactoring a clientes MCP (Claude Code, Cursor,
+    | Codex, MCP Inspector). stdio é o transporte padrão. HTTP é opt-in, faz
+    | bind apenas em loopback por padrão e sempre exige bearer token.
+    */
+    'mcp' => [
+        'enabled' => env('AGENT_KIT_MCP_ENABLED', true),
+        'transport' => env('AGENT_KIT_MCP_TRANSPORT', 'stdio'),
+        // null = base_path() da aplicação Laravel que hospeda o pacote
+        'project_root' => env('AGENT_KIT_MCP_PROJECT_ROOT'),
+
+        'http' => [
+            'enabled' => env('AGENT_KIT_MCP_HTTP_ENABLED', false),
+            'host' => env('AGENT_KIT_MCP_HTTP_HOST', '127.0.0.1'),
+            'port' => (int) env('AGENT_KIT_MCP_HTTP_PORT', 8787),
+            'path' => env('AGENT_KIT_MCP_HTTP_PATH', '/mcp'),
+            // Bind fora de loopback exige opt-in explícito; o token continua obrigatório
+            'allow_remote' => (bool) env('AGENT_KIT_MCP_ALLOW_REMOTE', false),
+            // Hosts/origins adicionais permitidos (separados por vírgula); loopback já é permitido
+            'allowed_origins' => env('AGENT_KIT_MCP_ALLOWED_ORIGINS', ''),
+            // Mínimo de 32 caracteres. Gere com: php -r 'echo bin2hex(random_bytes(32));'
+            'bearer_token' => env('AGENT_KIT_MCP_BEARER_TOKEN'),
+            'max_body_bytes' => (int) env('AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES', 1048576),
+            'idle_timeout' => (int) env('AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT', 60),
+            'max_concurrent_requests' => (int) env('AGENT_KIT_MCP_HTTP_MAX_CONCURRENT', 4),
+            'session_ttl' => (int) env('AGENT_KIT_MCP_HTTP_SESSION_TTL', 3600),
+            'max_sessions' => (int) env('AGENT_KIT_MCP_HTTP_MAX_SESSIONS', 100),
+        ],
+
+        'index_cache' => [
+            // Índices AST mantidos em memória por processo (um por raiz de projeto)
+            'max_entries' => (int) env('AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES', 1),
+        ],
+
+        'logging' => [
+            'level' => env('AGENT_KIT_MCP_LOG_LEVEL', 'info'),
+            // null = stderr (obrigatório para stdio); ou um canal de config/logging.php
+            'channel' => env('AGENT_KIT_MCP_LOG_CHANNEL'),
+        ],
+    ],
 ];

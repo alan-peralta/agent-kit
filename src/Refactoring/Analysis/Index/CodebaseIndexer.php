@@ -12,7 +12,7 @@ use Peralta\AgentKit\Refactoring\Analysis\Graph\Confidence;
 use Peralta\AgentKit\Refactoring\Support\ProjectRoot;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
 
-final class CodebaseIndexer
+final class CodebaseIndexer implements CodebaseIndexBuilder
 {
     public function __construct(
         private readonly ProjectScanner $scanner,

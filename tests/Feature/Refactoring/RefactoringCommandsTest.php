@@ -62,6 +62,10 @@ final class RefactoringCommandsTest extends TestCase
             array_column($decoded['data']['capabilities'], 'name'),
         );
         self::assertSame(
+            ['refactoring_audit', 'refactoring_analyze', 'refactoring_callers', 'refactoring_dependencies', 'refactoring_impact'],
+            array_column($decoded['data']['capabilities'], 'mcp_tool'),
+        );
+        self::assertSame(
             json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             trim($output),
         );
