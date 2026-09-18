@@ -49,4 +49,33 @@ class DeepSeekProviderTest extends TestCase
         $this->assertSame(4, $response->inputTokens);
         $this->assertSame(2, $response->outputTokens);
     }
+
+    public function test_chat_forwards_response_format_and_timeout_options()
+    {
+        [$stack, $history] = $this->mockHandlerStack([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['role' => 'assistant', 'content' => '{"uuids":[]}'], 'finish_reason' => 'stop']],
+            ])),
+        ]);
+
+        $provider = new DeepSeekProvider([
+            'base_url' => 'http://api.test',
+            'api_key' => 'secret-key',
+            'model' => 'deepseek-chat',
+            'handler' => $stack,
+        ]);
+
+        $provider->chat(
+            messages: [Message::user('responda em json')],
+            options: ['response_format' => ['type' => 'json_object'], 'timeout' => 8],
+        );
+
+        $request = $history[0]['request'];
+        $this->assertSame('http://api.test/chat/completions', (string) $request->getUri());
+
+        $body = json_decode((string) $request->getBody(), true);
+        $this->assertSame(['type' => 'json_object'], $body['response_format']);
+        $this->assertArrayNotHasKey('timeout', $body);
+        $this->assertSame(8, $history[0]['options']['timeout']);
+    }
 }

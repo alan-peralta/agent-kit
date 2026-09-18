@@ -2,8 +2,12 @@
 
 namespace Peralta\AgentKit\Tests\Unit\Providers;
 
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use Peralta\AgentKit\DTOs\Message;
+use Peralta\AgentKit\ErrorRecovery\Classifiers\DefaultErrorClassifier;
+use Peralta\AgentKit\ErrorRecovery\Enums\ErrorType;
 use Peralta\AgentKit\Exceptions\ProviderException;
 use Peralta\AgentKit\Providers\OpenAIProvider;
 use Peralta\AgentKit\Tests\Unit\Providers\Concerns\MocksGuzzleHttp;
@@ -101,6 +105,97 @@ class OpenAIProviderTest extends TestCase
                 'parameters' => ['type' => 'object'],
             ],
         ]], $body['tools']);
+    }
+
+    public function test_chat_sends_response_format_when_option_is_set()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['role' => 'assistant', 'content' => '{"ok":true}'], 'finish_reason' => 'stop']],
+            ])),
+        ]);
+
+        $provider->chat(
+            messages: [Message::user('responda em json')],
+            options: ['response_format' => ['type' => 'json_object']],
+        );
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame(['type' => 'json_object'], $body['response_format']);
+    }
+
+    /**
+     * Guard de retrocompatibilidade: sem a opção, o payload é idêntico ao de antes
+     * da introdução de response_format — consumidores não podem receber a chave.
+     */
+    public function test_chat_omits_response_format_by_default()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['role' => 'assistant', 'content' => 'oi'], 'finish_reason' => 'stop']],
+            ])),
+        ]);
+
+        $provider->chat(messages: [Message::user('oi')]);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayNotHasKey('response_format', $body);
+    }
+
+    public function test_chat_applies_per_call_timeout_to_request_options()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['role' => 'assistant', 'content' => 'oi'], 'finish_reason' => 'stop']],
+            ])),
+        ]);
+
+        $provider->chat(messages: [Message::user('oi')], options: ['timeout' => 8]);
+
+        $this->assertSame(8, $history[0]['options']['timeout']);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayNotHasKey('timeout', $body);
+    }
+
+    /**
+     * Guard de retrocompatibilidade: sem a opção, vale o timeout de client
+     * (default 60 s de AbstractProvider), que o Guzzle mescla nas opções da requisição.
+     */
+    public function test_chat_keeps_client_timeout_when_option_is_absent()
+    {
+        [$provider, $history] = $this->provider([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['role' => 'assistant', 'content' => 'oi'], 'finish_reason' => 'stop']],
+            ])),
+        ]);
+
+        $provider->chat(messages: [Message::user('oi')]);
+
+        $this->assertSame(60, $history[0]['options']['timeout']);
+    }
+
+    /**
+     * Guard: o timeout por chamada não muda o tratamento de erro — a falha continua
+     * chegando como ProviderException com ConnectException em previous, o que mantém
+     * a classificação NETWORK_TIMEOUT do DefaultErrorClassifier.
+     */
+    public function test_chat_per_call_timeout_failure_keeps_provider_exception_with_connect_exception_previous()
+    {
+        $connectException = new ConnectException(
+            'cURL error 28: Operation timed out',
+            new Request('POST', 'http://api.test/chat/completions'),
+        );
+
+        [$provider] = $this->provider([$connectException]);
+
+        try {
+            $provider->chat(messages: [Message::user('oi')], options: ['timeout' => 1]);
+            $this->fail('Esperava ProviderException.');
+        } catch (ProviderException $e) {
+            $this->assertInstanceOf(ConnectException::class, $e->getPrevious());
+            $this->assertSame(ErrorType::NETWORK_TIMEOUT, (new DefaultErrorClassifier)->classify($e));
+        }
     }
 
     public function test_chat_serializes_tool_result_message_into_flat_tool_message()
