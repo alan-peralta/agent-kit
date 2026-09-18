@@ -290,6 +290,7 @@ Eventos disparados:
 O Agent Kit inclui um auditor inicial de refatoração para PHP/Laravel. Ele coleta sinais determinísticos do codebase para que agentes de coding possam raciocinar com dados objetivos antes de propor mudanças.
 
 ```bash
+php artisan agent-kit:refactor-capabilities --json
 php artisan agent-kit:refactor-audit
 php artisan agent-kit:refactor-audit /path/to/project
 php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
@@ -318,10 +319,27 @@ php artisan agent-kit:agents:install claude --path=/project
 php artisan agent-kit:agents:install --all --path=/project
 ```
 
+As skills geradas usam duas fontes: as tools MCP e, como fallback, os comandos
+`php artisan agent-kit:refactor-* --json` executados **dentro** de `/project`.
+Esse fallback só funciona se `/project` também tiver o `peralta/agent-kit`
+instalado (veja [Instalação](#instalação)). Se não tiver, mantenha o servidor MCP
+rodando com `--path=/project` — ele é a única fonte de dados nesse caso.
+
 `--path=/project` precisa apontar para um diretório existente; um valor vazio é
 rejeitado. Use agentes posicionais (`cursor`, `claude`) ou `--all`, nunca ambos.
 Arquivos personalizados em conflito são preservados, exceto quando `--force` é
 fornecido explicitamente.
+
+A instalação grava, por agente:
+
+```text
+.claude/skills/refactor-{audit,analyze,callers,dependencies,impact,plan}/SKILL.md
+.claude/rules/agent-kit-refactoring.md
+.cursor/skills/refactor-{audit,analyze,callers,dependencies,impact,plan}/SKILL.md
+.cursor/rules/agent-kit-refactoring.mdc
+```
+
+Comite esses arquivos se toda a equipe deve compartilhar o mesmo workflow.
 
 Cursor e Claude Code recebem os mesmos seis comandos portáveis:
 
@@ -336,9 +354,10 @@ Cursor e Claude Code recebem os mesmos seis comandos portáveis:
 
 Exemplo: `/refactor-impact App\Services\PaymentService::charge`.
 
-As skills tentam obter fatos na ordem: tools MCP do Agent Kit (`refactoring_audit`,
-`refactoring_analyze`, `refactoring_callers`, `refactoring_dependencies`,
-`refactoring_impact`), CLI `agent-kit:refactor-* --json`, leitura/pesquisa no
+As skills tentam obter fatos na ordem: tools MCP do Agent Kit
+(`refactoring_capabilities`, `refactoring_audit`, `refactoring_analyze`,
+`refactoring_callers`, `refactoring_dependencies`, `refactoring_impact`),
+CLI `agent-kit:refactor-* --json`, leitura/pesquisa no
 repositório e, por último, interpretação do LLM. Elas separam `FACTS`,
 `INTERPRETATION` e `RECOMMENDATIONS`, sinalizam comportamento dinâmico não
 resolvido e mantêm `ANALYZE != MODIFY`.

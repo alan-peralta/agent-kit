@@ -5,6 +5,7 @@ Agent Kit includes an initial deterministic refactoring audit for PHP/Laravel pr
 ## Commands
 
 ```bash
+php artisan agent-kit:refactor-capabilities --json
 php artisan agent-kit:refactor-audit
 php artisan agent-kit:refactor-audit /path/to/project
 php artisan agent-kit:refactor-analyze app/Services/PaymentService.php
@@ -14,12 +15,16 @@ php artisan agent-kit:refactor-dependencies "App\Services\PaymentService"
 php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge"
 ```
 
+`refactor-capabilities` lists every capability with its MCP tool name and CLI
+fallback; the generated skills call it first.
+
 The graph commands accept `--path=/path/to/project` and default to the Laravel
 base path. Add `--json` to emit deterministic structured output without tables.
 For audit, the project root is the optional positional argument. Its reports
 stay under the analyzed project by default; `--output=/explicit/directory` may
 select another destination explicitly. JSON mode emits data without writing
-reports.
+reports. Pass `--no-baseline` to run the audit without writing or overwriting
+`baseline.json` (useful in CI, where the trend baseline should not move).
 
 The audit writes:
 
@@ -49,6 +54,23 @@ them is rejected. Installation creates only Agent Kit-dedicated files. A
 different existing file is reported as a conflict and preserved; `--force`
 must be explicit to overwrite it. Reinstalling identical content reports the
 file as unchanged.
+
+Installation writes, per agent:
+
+```text
+.claude/skills/refactor-{audit,analyze,callers,dependencies,impact,plan}/SKILL.md
+.claude/rules/agent-kit-refactoring.md
+.cursor/skills/refactor-{audit,analyze,callers,dependencies,impact,plan}/SKILL.md
+.cursor/rules/agent-kit-refactoring.mdc
+```
+
+Commit these files when the whole team should share the same refactoring workflow.
+
+The generated CLI fallback runs `php artisan agent-kit:refactor-* --json` with no
+`--path`, so it resolves against the analyzed project's own `artisan`. That
+fallback therefore requires Agent Kit to be installed in `/project` as well. When
+it is not, run the MCP server against the project (`agent-kit:mcp --path=/project`)
+and rely on the MCP tools only.
 
 Both adapters expose the same portable interface:
 
@@ -144,10 +166,12 @@ intersection, and nullable types are decomposed into their class-like members.
 Code outside a named class — `routes/*.php`, `config/*.php`,
 `bootstrap/app.php`, helper files and anonymous-class migrations — is indexed
 too. A file with at least one reference at script scope or at least one
-top-level function yields a `script` symbol identified by its root-relative
-path (for example `routes/web.php`, with `kind: "script"` and `line: 1`).
-The symbol is created only when needed, so files that only declare classes
-keep exactly the symbols they declare.
+top-level function yields a `script` symbol identified by its root-relative path
+(for example `routes/web.php`). `script` is an internal classification used for
+target resolution; it is not emitted in CLI or MCP JSON. Recognize a script in the
+output by its target/`source` being a file path rather than an FQCN. The symbol
+is created only when needed, so files that only declare classes keep exactly the
+symbols they declare.
 
 References are attributed to the routine that declares the code:
 
@@ -236,12 +260,18 @@ The JSON caller schema is:
     "method": "charge",
     "direct_callers": [],
     "structural_dependencies": [],
-    "transitive_dependents": []
+    "transitive_dependents": [],
+    "unresolved_scope": "project"
   },
   "diagnostics": [],
   "unresolved": []
 }
 ```
+
+`incomplete`, `diagnostics` and `unresolved` describe the whole indexed project,
+not only the queried target: a dynamic call in an unrelated file sets
+`incomplete: true` for every capability. `find_callers` states this explicitly
+with `unresolved_scope: "project"`, which is the only value emitted today.
 
 Each caller/dependency item contains `source`, `source_method`, `target`,
 `target_method`, `type`, `confidence`, `file`, `line`, and `metadata`.
@@ -280,7 +310,8 @@ The analyzer recognizes statically explicit forms of:
 - `app(Service::class)`
 - `resolve(Service::class)`
 - `app()->make(Service::class)`
-- static calls through configured Laravel Facade prefixes
+- static calls through Facade prefixes configured in `agent-kit.refactoring.facades`
+  (default: `Illuminate\Support\Facades\`)
 
 Event/job dispatches preserve both the dispatch relationship and any direct
 static/Facade call. Dynamic strings and expressions are not guessed.
@@ -293,11 +324,20 @@ indexing. Defaults exclude `vendor`, `storage`, `bootstrap/cache`,
 file is parsed once per index build. Declaration and reverse-reference maps
 avoid rescanning for each query.
 
-A syntax error, an unreadable file or an internal analysis failure in one PHP
-file produces a diagnostic (`Analysis failed: …` for the latter two) and
+In the AST-based commands (`refactor-analyze`, `refactor-callers`,
+`refactor-dependencies`, `refactor-impact`) a syntax error or an internal analysis
+failure in one PHP file produces a diagnostic (`Analysis failed: …`) and
 indexing continues. Text output warns that results may be incomplete; JSON
 includes file, line, and message in `diagnostics`. An invalid project root or
 missing target class fails the command clearly.
+
+Two limits apply today. `refactor-audit` uses a separate token-based analyzer and
+never reports diagnostics: its `diagnostics` array is always empty and `incomplete`
+is always `false`, so a file with a syntax error is still counted with naive
+metrics. And a PHP file the process cannot read aborts the command with an
+exception instead of a diagnostic, because the audit reader and the index cache
+fingerprint both read every scanned file before per-file error handling runs.
+Exclude unreadable paths under `agent-kit.refactoring` before running the commands.
 
 The MCP server keeps the index in memory between calls and rebuilds it only when
 a content fingerprint of the included PHP files changes; separate CLI invocations
