@@ -833,6 +833,31 @@ PHP));
         $this->assertSame([], $impact->diagnostics);
     }
 
+    public function test_an_analysis_failure_in_one_file_is_reported_as_an_envelope_diagnostic(): void
+    {
+        $parser = new class(new PhpAstParser()) implements AstParser {
+            public function __construct(private readonly AstParser $inner) {}
+
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                if (str_ends_with($file, 'LogsPayments.php')) {
+                    throw new \RuntimeException('boom');
+                }
+
+                return $this->inner->parse($file, $displayPath);
+            }
+        };
+
+        $result = $this->service($parser)->impact($this->root, 'Fixtures\\Payments\\PaymentService::charge');
+
+        $this->assertSame('Fixtures\\Payments\\PaymentService', $result->data['target']);
+        $this->assertSame(
+            [['file' => 'LogsPayments.php', 'line' => 1, 'message' => 'Analysis failed: RuntimeException: boom']],
+            $result->diagnostics,
+        );
+        $this->assertTrue($result->incomplete());
+    }
+
     private function countingParser(): AstParser
     {
         return new class(new PhpAstParser()) implements AstParser {

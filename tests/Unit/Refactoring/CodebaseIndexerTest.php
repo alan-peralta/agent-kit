@@ -57,6 +57,42 @@ final class CodebaseIndexerTest extends TestCase
         rmdir($root);
     }
 
+    public function test_a_failing_file_becomes_a_diagnostic_and_indexing_continues(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-failure-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/Broken.php', '<?php class Broken {}');
+        file_put_contents($root . '/Fine.php', '<?php class Fine {}');
+
+        $parser = new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                if (str_ends_with($file, 'Broken.php')) {
+                    throw new \TypeError('Cannot assign null to property StructureCollector::$localTypes of type array');
+                }
+
+                return new ParsedFile($displayPath ?? $file, [
+                    new SymbolDefinition('Fine', 'class', $displayPath ?? $file, 1),
+                ]);
+            }
+        };
+
+        try {
+            $index = (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), $parser))->build($root);
+        } finally {
+            unlink($root . '/Broken.php');
+            unlink($root . '/Fine.php');
+            rmdir($root);
+        }
+
+        $this->assertNotNull($index->findClass('Fine'));
+        $this->assertSame([[
+            'file' => 'Broken.php',
+            'line' => 1,
+            'message' => 'Analysis failed: TypeError: Cannot assign null to property StructureCollector::$localTypes of type array',
+        ]], array_map(fn ($diagnostic) => $diagnostic->toArray(), $index->diagnostics()));
+    }
+
     public function test_it_indexes_real_declarations_and_reverse_references(): void
     {
         $root = dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast';

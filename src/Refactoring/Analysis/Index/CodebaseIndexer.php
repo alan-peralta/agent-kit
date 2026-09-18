@@ -32,7 +32,19 @@ final class CodebaseIndexer
 
         foreach ($this->scanner->phpFiles($root) as $file) {
             $relative = ProjectRoot::relative($root, $file);
-            $parsed = $this->parser->parse($file, $relative);
+            try {
+                $parsed = $this->parser->parse($file, $relative);
+            } catch (\Throwable $failure) {
+                // One unreadable or unanalysable file must not abort the whole index; the
+                // message deliberately omits the exception's own file/line (internal paths
+                // would otherwise leave the process through the MCP HTTP transport).
+                $diagnostics[] = new ParseDiagnostic(
+                    $relative,
+                    1,
+                    sprintf('Analysis failed: %s: %s', $failure::class, $failure->getMessage()),
+                );
+                continue;
+            }
             $diagnostics = array_merge($diagnostics, $parsed->diagnostics);
             $references = array_merge($references, $parsed->references);
 
