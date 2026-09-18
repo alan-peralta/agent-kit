@@ -47,6 +47,7 @@ use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CachedCodebaseIndexer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\IndexSnapshotStore;
 use Peralta\AgentKit\Refactoring\Analysis\Index\ProjectFingerprint;
 use Peralta\AgentKit\Refactoring\Agents\AgentAdapterRegistry;
 use Peralta\AgentKit\Refactoring\Agents\AgentCommandRepository;
@@ -304,11 +305,17 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(ProjectScanner::class),
         ));
         // One cache per process: the MCP server keeps it for its whole life, the CLI for one command.
-        $this->app->singleton(CachedCodebaseIndexer::class, fn ($app) => new CachedCodebaseIndexer(
-            $app->make(CodebaseIndexer::class),
-            $app->make(ProjectFingerprint::class),
-            max(1, (int) config('agent-kit.mcp.index_cache.max_entries', 1)),
-        ));
+        $this->app->singleton(CachedCodebaseIndexer::class, function ($app) {
+            $path = config('agent-kit.mcp.index_cache.path');
+            $snapshots = $path === '' ? null : new IndexSnapshotStore($path ?? storage_path('framework/cache/agent-kit/index'));
+
+            return new CachedCodebaseIndexer(
+                $app->make(CodebaseIndexer::class),
+                $app->make(ProjectFingerprint::class),
+                max(1, (int) config('agent-kit.mcp.index_cache.max_entries', 1)),
+                $snapshots,
+            );
+        });
         $this->app->bind(CodebaseIndexBuilder::class, fn ($app) => $app->make(CachedCodebaseIndexer::class));
         $this->app->singleton(CallerAnalyzer::class);
         $this->app->bind(ImpactAnalyzer::class, fn () => new ImpactAnalyzer(

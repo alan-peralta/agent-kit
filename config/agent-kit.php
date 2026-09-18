@@ -359,6 +359,10 @@ return [
         'index_cache' => [
             // Índices AST mantidos em memória por processo (um por raiz de projeto)
             'max_entries' => (int) env('AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES', 1),
+
+            // Snapshot em disco do índice AST, reaproveitado entre processos (CLI, rota HTTP).
+            // Vazio desliga; null = storage/framework/cache/agent-kit/index
+            'path' => env('AGENT_KIT_MCP_INDEX_CACHE_PATH'),
         ],
 
         'logging' => [

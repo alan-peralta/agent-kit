@@ -35,4 +35,14 @@ final class McpConfigurationTest extends TestCase
         self::assertTrue(class_exists(\Mcp\Server::class));
         self::assertTrue(class_exists(\React\Http\HttpServer::class), 'react/http must be a dev dependency so the HTTP listener is tested.');
     }
+
+    public function test_the_package_default_for_the_index_cache_path_is_null(): void
+    {
+        // TestCase::getEnvironmentSetUp() overrides this to '' so tests never share snapshots;
+        // read the shipped config file directly to check the package's own default.
+        $config = require __DIR__ . '/../../../config/agent-kit.php';
+
+        self::assertArrayHasKey('path', $config['mcp']['index_cache']);
+        self::assertNull($config['mcp']['index_cache']['path']);
+    }
 }
