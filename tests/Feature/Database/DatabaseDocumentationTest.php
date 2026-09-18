@@ -23,12 +23,21 @@ final class DatabaseDocumentationTest extends TestCase
         }
 
         $this->assertStringContainsString('AGENT_KNOWLEDGE_STORE=database', $readme);
+        $this->assertStringContainsString('AGENT_KNOWLEDGE_STORE=database', $setup);
+        $this->assertStringContainsString('Vindo da v0.3.x ou anterior', $readme);
+        $this->assertStringContainsString('2026_05_05_000002_create_knowledge_chunks_table.php', $readme);
         $this->assertMatchesRegularExpression('/^# Knowledge Store: .*database/m', $read('.env.example'));
         $this->assertStringContainsString('AGENT_KIT_TEST_DB_CONNECTION', $read('CONTRIBUTING.md'));
 
-        foreach (['sem tag própria', 'a migration do pgvector continua sendo executada', 'compartilham a mesma tag'] as $stale) {
-            $this->assertStringNotContainsString($stale, $readme, $stale);
-            $this->assertStringNotContainsString($stale, $setup, $stale);
+        $stale = [
+            'sem tag própria',
+            'a migration do pgvector continua sendo executada',
+            'compartilham a mesma tag',
+            'Vindo da v0.2.x: a migration',
+        ];
+        foreach ($stale as $text) {
+            $this->assertStringNotContainsString($text, $readme, $text);
+            $this->assertStringNotContainsString($text, $setup, $text);
         }
     }
 }

@@ -76,6 +76,10 @@ AGENT_KIT_MCP_HTTP_ENABLED=false
 # AGENT_KIT_MCP_BEARER_TOKEN=   # obrigatório só para --transport=http (32+ chars)
 ```
 
+> MySQL/MariaDB: use `AGENT_KNOWLEDGE_STORE=database` e deixe `AGENT_KNOWLEDGE_DB=` vazio
+> para usar a conexão padrão da aplicação, ou `AGENT_KNOWLEDGE_STORE=qdrant` com as
+> variáveis `QDRANT_*`.
+
 ### Opções de Provider:
 - `openai` - GPT-4, GPT-4o
 - `anthropic` - Claude

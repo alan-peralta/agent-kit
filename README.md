@@ -44,6 +44,11 @@ A migration do pgvector executa `CREATE EXTENSION IF NOT EXISTS vector` na conex
 `config/database.php` antes do `migrate`. Quem não usa RAG não publica nenhuma tag de
 knowledge base.
 
+As migrations de knowledge base dos stores `pgvector` e `database` criam a mesma tabela,
+`knowledge_chunks`. Publique só a tag do store em uso e evite `vendor:publish --provider`,
+que publica todas as tags. Para trocar de store, apague a tabela antiga ou mude `table` no
+config.
+
 Alternativa mais curta para um checkout local do pacote:
 
 ```bash
@@ -52,6 +57,18 @@ composer require peralta/agent-kit:@dev
 ```
 
 ## Atualizando
+
+Vindo da v0.3.x ou anterior: a migration do `knowledge_chunks` para pgvector saiu da tag
+`agent-kit-migrations` e passou para `agent-kit-pgvector-migrations`.
+
+- Quem usa pgvector e já publicou as migrations não precisa fazer nada, porque o arquivo
+  mantém o mesmo nome. Instalações novas com pgvector publicam as duas tags.
+- Quem usa MySQL, MariaDB, SQLite ou Qdrant e já publicou as migrations de uma versão
+  anterior deve apagar `database/migrations/2026_05_05_000002_create_knowledge_chunks_table.php`
+  do app, se ela ainda não rodou: ela exige PostgreSQL com pgvector e faz o `migrate` falhar.
+- O store `database` funciona com um `config/agent-kit.php` publicado antes desta versão,
+  usando a conexão padrão e a tabela `knowledge_chunks`. Para usar `AGENT_KNOWLEDGE_DB` ou
+  outra tabela, copie o bloco `database` de `knowledge.stores` do config do pacote para o seu.
 
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
 `response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
@@ -63,11 +80,6 @@ Vindo da v0.1.0: `composer update peralta/agent-kit`, depois
 seções `refactoring` e `mcp` (ou deixe o merge automático de config resolver, se você
 não usa `config:cache`). Se usa cache de config, rode `php artisan config:clear`.
 Nenhuma migration nova é necessária. Veja [CHANGELOG.md](CHANGELOG.md).
-
-Vindo da v0.2.x: a migration do `knowledge_chunks` para pgvector saiu da tag
-`agent-kit-migrations` e passou para `agent-kit-pgvector-migrations`. Quem já publicou as
-migrations não precisa fazer nada, porque o arquivo mantém o mesmo nome. Instalações novas
-com pgvector publicam as duas tags.
 
 ## Configuração
 
@@ -260,9 +272,12 @@ php artisan vendor:publish --tag=agent-kit-database-store-migrations
 php artisan migrate
 ```
 
+Com um `config/agent-kit.php` publicado antes desta versão, o store usa a conexão padrão e
+a tabela `knowledge_chunks`; veja [Atualizando](#atualizando).
+
 Cada busca lê todos os embeddings do tenant, e da coleção quando ela é informada, então o
-custo cresce de forma linear. Medido em MySQL 8.4 com embeddings de 1536 dimensões e a
-tabela já no buffer pool:
+custo cresce de forma linear. Medido em MySQL 8.4 (Docker num Apple M4 Pro) com embeddings
+de 1536 dimensões e a tabela já no buffer pool:
 
 | Chunks por tenant e coleção | Tempo por busca |
 |---|---|
