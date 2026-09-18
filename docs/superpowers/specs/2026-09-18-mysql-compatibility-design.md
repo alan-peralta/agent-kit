@@ -96,12 +96,16 @@ existing ones are `DatabaseStoreTest`, `HybridStoreTest`, `AgentMetricTest`,
 
 ### Engine-matrix tests
 
-New tests in the `database` group:
+New tests:
 
-- **Publishing:** each tag maps exactly the directory in the table above, the
-  default tag contains no pgvector migration, and every migration file shipped
-  by the package belongs to exactly one tag.
-- **Core migrations:** the two core migrations run `up()` and `down()` on the
+- **Publishing** (engine-agnostic, so outside the group and run by the SQLite
+  job): each tag maps exactly the directory in the table above, the default tag
+  contains no pgvector migration, and every migration file shipped by the
+  package belongs to exactly one tag.
+- **Connection** (in the group): the default connection really uses the driver
+  named by `AGENT_KIT_TEST_DB_CONNECTION`, so a misconfigured run cannot pass
+  silently on SQLite.
+- **Core migrations** (in the group, like the rest of this list): the two core migrations run `up()` and `down()` on the
   current engine and create the expected columns.
 - **Database-store migration:** runs `up()` and `down()` on the current engine.
 - **pgvector:** on a `pgsql` connection where the `vector` extension is
