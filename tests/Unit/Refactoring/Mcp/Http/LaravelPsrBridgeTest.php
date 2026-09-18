@@ -9,6 +9,9 @@ use GuzzleHttp\Psr7\Utils;
 use Illuminate\Http\Request;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\LaravelPsrBridge;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Psr\Log\LoggerTrait;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -113,5 +116,66 @@ final class LaravelPsrBridgeTest extends TestCase
         $output = ob_get_clean();
 
         self::assertSame('the whole body, in one piece', $output);
+    }
+
+    public function test_to_laravel_response_stops_streaming_and_reports_a_mid_stream_failure_without_letting_it_escape(): void
+    {
+        $chunks = ['first-chunk-'];
+        $body = FnStream::decorate(Utils::streamFor('first-chunk-then-it-breaks'), [
+            'getSize' => static fn () => null,
+            'eof' => static fn () => false,
+            'read' => static function () use (&$chunks) {
+                if ($chunks !== []) {
+                    return array_shift($chunks);
+                }
+
+                throw new RuntimeException('the stream blew up mid-flight, at /secret/path');
+            },
+        ]);
+
+        $logger = new class implements LoggerInterface {
+            use LoggerTrait;
+
+            /** @var list<array{message: string, context: array}> */
+            public array $errors = [];
+
+            public function log($level, $message, array $context = []): void
+            {
+                if ((string) $level === 'error') {
+                    $this->errors[] = ['message' => (string) $message, 'context' => $context];
+                }
+            }
+        };
+        $response = new PsrResponse(200, [], $body);
+
+        $laravel = LaravelPsrBridge::toLaravelResponse($response, $logger);
+
+        ob_start();
+        $laravel->sendContent();
+        $output = ob_get_clean();
+
+        self::assertSame('first-chunk-', $output);
+        self::assertCount(1, $logger->errors);
+        self::assertSame('The MCP HTTP transport failed while streaming a response.', $logger->errors[0]['message']);
+        self::assertInstanceOf(RuntimeException::class, $logger->errors[0]['context']['exception']);
+    }
+
+    public function test_to_laravel_response_streams_without_a_logger_when_none_is_given(): void
+    {
+        $body = FnStream::decorate(Utils::streamFor('short'), [
+            'getSize' => static fn () => null,
+            'eof' => static fn () => false,
+            'read' => static function () {
+                throw new RuntimeException('fails on the very first read, no logger to tell');
+            },
+        ]);
+
+        $laravel = LaravelPsrBridge::toLaravelResponse(new PsrResponse(200, [], $body));
+
+        ob_start();
+        $laravel->sendContent();
+        $output = ob_get_clean();
+
+        self::assertSame('', $output);
     }
 }

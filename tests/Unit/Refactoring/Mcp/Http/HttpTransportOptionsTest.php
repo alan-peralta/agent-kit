@@ -91,8 +91,16 @@ final class HttpTransportOptionsTest extends TestCase
     {
         self::assertSame('/mcp', HttpTransportOptions::fromConfig($this->config(['path' => '/mcp/']))->path);
         self::assertSame('/mcp', HttpTransportOptions::fromConfig($this->config(['path' => 'mcp']))->path);
-        self::assertSame('/', HttpTransportOptions::fromConfig($this->config(['path' => '/']))->path);
         self::assertSame('/mcp', HttpTransportOptions::normalizePath('mcp/'));
+    }
+
+    public function test_an_empty_or_root_only_path_falls_back_to_mcp_instead_of_the_site_root(): void
+    {
+        self::assertSame('/mcp', HttpTransportOptions::normalizePath(''));
+        self::assertSame('/mcp', HttpTransportOptions::normalizePath('/'));
+        self::assertSame('/mcp', HttpTransportOptions::normalizePath('//'));
+        self::assertSame('/mcp', HttpTransportOptions::fromConfig($this->config(['path' => '']))->path);
+        self::assertSame('/mcp', HttpTransportOptions::fromConfig($this->config(['path' => '/']))->path);
     }
 
     public function test_the_app_urls_host_is_allowed_but_is_not_a_cors_origin(): void

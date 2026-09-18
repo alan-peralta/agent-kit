@@ -54,8 +54,9 @@ final readonly class HttpTransportOptions
         $cacheStore = trim((string) ($config['cache_store'] ?? ''));
 
         return new self(
-            // trim() on both ends, so '/mcp/', 'mcp' and '/mcp' all normalise to '/mcp' and the
-            // bare root '/' stays '/' - the endpoint comparison in HttpTransportFactory is exact.
+            // '/mcp/', 'mcp' and '/mcp' all normalise to '/mcp'; an empty or root-only path
+            // (an unset AGENT_KIT_MCP_HTTP_PATH, or one trimmed down to nothing) also falls back
+            // to '/mcp' rather than mounting the transport on the host application's site root.
             path: self::normalizePath((string) ($config['path'] ?? '/mcp')),
             allowRemote: (bool) ($config['allow_remote'] ?? false),
             allowedHosts: $allowedHosts,
@@ -70,7 +71,10 @@ final readonly class HttpTransportOptions
 
     public static function normalizePath(string $path): string
     {
-        return '/' . trim($path, '/');
+        $trimmed = trim($path, '/');
+
+        // An empty result ('', '/' or '//') must not mount the transport on the site root.
+        return $trimmed === '' ? '/mcp' : '/' . $trimmed;
     }
 
     /** @return list<string> lower-cased hosts, ports and schemes stripped, IPv6 kept bracketed */

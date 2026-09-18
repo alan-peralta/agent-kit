@@ -95,6 +95,20 @@ final class HttpRouteTest extends TestCase
         $response = $this->send('POST', $this->auth(), $this->initialize(), 'http://evil.test/mcp');
 
         self::assertSame(403, $response->getStatusCode());
+        self::assertSame('Forbidden: Invalid Host header.', $response->getContent());
+    }
+
+    public function test_a_disallowed_origin_is_403_even_with_a_valid_token_and_a_loopback_client(): void
+    {
+        $response = $this->send('POST', $this->auth(['Origin' => 'http://evil.example']), $this->initialize());
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('Forbidden: Invalid Origin header.', $response->getContent());
+    }
+
+    public function test_the_route_carries_no_middleware(): void
+    {
+        self::assertSame([], Route::getRoutes()->getByName('agent-kit.mcp')->gatherMiddleware());
     }
 
     public function test_get_is_405(): void
@@ -132,6 +146,21 @@ final class HttpRouteTest extends TestCase
         );
         self::assertStringNotContainsString(self::SHORT_TOKEN, (string) $response->getContent());
         self::assertStringNotContainsString('AGENT_KIT_MCP_BEARER_TOKEN', (string) $response->getContent());
+    }
+
+    public function test_an_unknown_cache_store_is_503_with_the_verbatim_misconfigured_body_and_no_secrets(): void
+    {
+        config(['agent-kit.mcp.http.cache_store' => 'missing']);
+
+        $response = $this->send('POST', [], $this->initialize());
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertSame(
+            '{"error":"misconfigured","message":"The MCP HTTP transport is not configured correctly; see the application log."}',
+            $response->getContent(),
+        );
+        self::assertStringNotContainsString('missing', (string) $response->getContent());
+        self::assertStringNotContainsString('Cache store', (string) $response->getContent());
     }
 
     public function test_bodies_over_the_limit_are_413(): void

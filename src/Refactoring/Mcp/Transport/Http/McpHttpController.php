@@ -7,11 +7,11 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Log\LogManager;
 use Mcp\Server\Session\Psr16SessionStore;
-use Peralta\AgentKit\Refactoring\Mcp\McpConfigurationException;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 final class McpHttpController
 {
@@ -29,7 +29,13 @@ final class McpHttpController
         try {
             $options = HttpTransportOptions::fromConfig((array) ($config['http'] ?? []), (string) config('app.url', ''));
             $root = McpProjectRoot::fromPath((string) (($config['project_root'] ?? null) ?: base_path()));
-        } catch (McpConfigurationException $exception) {
+            // Illuminate\Contracts\Cache\Repository (what CacheFactory::store() returns) already
+            // implements PSR-16's CacheInterface, so it satisfies Psr16SessionStore without an
+            // adapter. An unknown store name throws here too (InvalidArgumentException) - that is
+            // as much a deployment misconfiguration as a bad token or project root, and must not
+            // reach an unauthenticated client as a raw exception.
+            $sessions = new Psr16SessionStore($this->cache->store($options->cacheStore), 'agent-kit-mcp-session-', $options->sessionTtl);
+        } catch (Throwable $exception) {
             $logger->error('The MCP HTTP transport is misconfigured.', ['reason' => $exception->getMessage()]);
 
             return new JsonResponse(['error' => 'misconfigured', 'message' => 'The MCP HTTP transport is not configured correctly; see the application log.'], 503);
@@ -43,15 +49,11 @@ final class McpHttpController
             set_time_limit($options->timeLimit);
         }
 
-        // Illuminate\Cache\Repository (what CacheFactory::store() returns) implements PSR-16's
-        // CacheInterface on Laravel 10-13, so it satisfies Psr16SessionStore without an adapter.
-        /** @var \Psr\SimpleCache\CacheInterface $store */
-        $store = $this->cache->store($options->cacheStore);
-        $sessions = new Psr16SessionStore($store, 'agent-kit-mcp-session-', $options->sessionTtl);
         $server = $this->servers->create($root, $logger, $sessions);
 
         return LaravelPsrBridge::toLaravelResponse(
             HttpTransportFactory::fromOptions($options)->handle($server, LaravelPsrBridge::toPsrRequest($request), $logger),
+            $logger,
         );
     }
 
