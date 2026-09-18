@@ -15,7 +15,7 @@
         "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
         "illuminate/database": "^10.0|^11.0|^12.0|^13.0",
         "illuminate/http": "^10.0|^11.0|^12.0|^13.0",
-        "guzzlehttp/guzzle": "^7.0"
+        "guzzlehttp/guzzle": "^7.0|^8.0"
     },
     "conflict": {
         "mcp/sdk": "<0.8.1 || >=0.9"

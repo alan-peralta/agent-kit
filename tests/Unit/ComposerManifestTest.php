@@ -24,6 +24,17 @@ final class ComposerManifestTest extends TestCase
         self::assertArrayNotHasKey('nikic/php-parser', $manifest['conflict'], 'An old php-parser elsewhere must not block the agent core.');
     }
 
+    public function test_guzzle_8_is_accepted_and_react_http_is_gone(): void
+    {
+        $manifest = $this->json('composer.json');
+
+        self::assertSame('^7.0|^8.0', $manifest['require']['guzzlehttp/guzzle'] ?? null);
+
+        foreach (['require', 'require-dev', 'suggest'] as $section) {
+            self::assertArrayNotHasKey('react/http', $manifest[$section] ?? [], "react/http must not appear in {$section}.");
+        }
+    }
+
     public function test_a_production_install_gets_none_of_them(): void
     {
         $lock = $this->json('composer.lock');
