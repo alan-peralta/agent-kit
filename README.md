@@ -261,13 +261,18 @@ php artisan migrate
 ```
 
 Cada busca lê todos os embeddings do tenant, e da coleção quando ela é informada, então o
-custo cresce de forma linear. Medido em MySQL 8.4 com embeddings de 1536 dimensões:
+custo cresce de forma linear. Medido em MySQL 8.4 com embeddings de 1536 dimensões e a
+tabela já no buffer pool:
 
 | Chunks por tenant e coleção | Tempo por busca |
 |---|---|
-| 1.000 | 80 ms |
-| 5.000 | 1,3 s |
-| 10.000 | 2,7 s |
+| 1.000 | 120 ms |
+| 5.000 | 460 ms |
+| 10.000 | 1,0 s |
+
+Quase todo o tempo é leitura: cada chunk carrega cerca de 8 KB de embedding. Com o cache
+frio, ou com um `innodb_buffer_pool_size` menor que a tabela, as mesmas buscas levaram de
+duas a três vezes mais.
 
 Use para FAQs, políticas e manuais de até alguns milhares de chunks por tenant e coleção.
 Acima disso, prefira pgvector ou Qdrant. Trocar de embedder exige reindexar: uma busca com
