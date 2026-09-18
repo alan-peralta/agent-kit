@@ -33,7 +33,7 @@
         "pgvector/pgvector": "^0.2"
     },
     "suggest": {
-        "mcp/sdk": "Required by the MCP server (php artisan agent-kit:mcp), ^0.8.1; install it with --dev",
+        "mcp/sdk": "Required by the MCP server (php artisan agent-kit:mcp and the Streamable HTTP route), ^0.8.1; install it with --dev",
         "nikic/php-parser": "Required by the Refactoring Agent's AST capabilities (analyze, callers, dependencies, impact), ^5.0; install it with --dev",
         "pgvector/pgvector": "Required for pgvector knowledge store",
         "smalot/pdfparser": "For extracting text from PDF documents",

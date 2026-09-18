@@ -99,7 +99,11 @@ para `<APP_URL><AGENT_KIT_MCP_HTTP_PATH>` (por exemplo, `http://127.0.0.1:8000/m
 `AGENT_KIT_MCP_HTTP_HOST`, `AGENT_KIT_MCP_HTTP_PORT`, `AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT`,
 `AGENT_KIT_MCP_HTTP_MAX_CONCURRENT` e `AGENT_KIT_MCP_HTTP_MAX_SESSIONS`, que não existem
 mais; `react/http` deixou de ser necessário. `agent-kit:mcp --transport=http` agora sai
-com uma mensagem explicando a mudança em vez de tentar escutar. Veja
+com uma mensagem explicando a mudança em vez de tentar escutar. Duas variáveis mudam de
+sentido: `AGENT_KIT_MCP_ALLOW_REMOTE=true` agora faz a rota aceitar clientes com IP fora
+de loopback (antes permitia fazer o bind do processo num endereço fora de loopback), e
+`AGENT_KIT_MCP_HTTP_ENABLED=true` registra a rota em todo ambiente que lê esse `.env`, não
+só no processo que você iniciava à mão; habilite-a apenas no `.env` de desenvolvimento. Veja
 [MCP_SERVER.md](MCP_SERVER.md#streamable-http).
 
 Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada

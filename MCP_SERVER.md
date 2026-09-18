@@ -51,7 +51,7 @@ are identical.
 | `AGENT_KIT_MCP_BEARER_TOKEN` | *(empty)* | required for HTTP, 32+ characters |
 | `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` / `_SESSION_TTL` / `_CACHE_STORE` / `_TIME_LIMIT` | see [Limits and lifecycle](#limits-and-lifecycle) | request bound, session lifetime, cache store and PHP time limit |
 | `AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES` | `1` | in-memory cached roots per process |
-| `AGENT_KIT_MCP_INDEX_CACHE_PATH` | *(empty in `.env.example`, disabled)* | on-disk AST index snapshot shared across per-request processes; unset falls back to `storage_path('framework/cache/agent-kit/index')` (see [Index cache](#index-cache)) |
+| `AGENT_KIT_MCP_INDEX_CACHE_PATH` | *(empty = `storage_path('framework/cache/agent-kit/index')`)* | directory of the on-disk AST index snapshot shared across per-request processes; `false` disables it (see [Index cache](#index-cache)) |
 | `AGENT_KIT_MCP_LOG_LEVEL` / `AGENT_KIT_MCP_LOG_CHANNEL` | `info` / *(stderr for stdio)* | logging |
 
 Command options: `--transport=stdio|http`, `--path=`.
@@ -167,8 +167,12 @@ php artisan serve
   are then the web server's job, not this package's.
 - Loopback-only by default: a request whose client IP (`$request->ip()`) is
   not `127.0.0.0/8` or `::1` gets `403` unless `AGENT_KIT_MCP_ALLOW_REMOTE=true`.
-  Behind a reverse proxy, configure Laravel's `TrustProxies` so `$request->ip()`
-  reports the real client address rather than the proxy's.
+  This guards against accidental exposure; it is not authentication. A reverse
+  proxy on the same host connects from loopback, so unless Laravel's
+  `TrustProxies` trusts it, every client it forwards looks local. Trusting
+  `'*'` goes too far the other way: any client can then claim a loopback
+  address in `X-Forwarded-For`. Trust only your proxy's address, and treat the
+  bearer token as the real boundary.
 - Enabling this on a deployed environment exposes read-only source analysis to
   anyone who holds the token and can reach the application (and, with
   `AGENT_KIT_MCP_ALLOW_REMOTE=true`, from any IP): keep it off in production
@@ -186,12 +190,20 @@ php artisan serve
   PHP-FPM) every session is lost as soon as the response that created it is
   sent; point `AGENT_KIT_MCP_HTTP_CACHE_STORE` at `file`, `redis`, `database`
   or another persistent store for real use.
-- `AGENT_KIT_MCP_HTTP_TIME_LIMIT` (default `120`) raises PHP's execution time
-  limit for the call (`set_time_limit`), because PHP-FPM stops scripts after
-  30 s by default; `0` leaves PHP's own limit alone.
+- `AGENT_KIT_MCP_HTTP_TIME_LIMIT` (default `120`) sets PHP's execution time
+  limit (`set_time_limit`) for the MCP request and restores the previous value
+  afterwards, so under Octane the limit is restored after each MCP call; `0`
+  leaves PHP's own limit alone. Exceeding it aborts the call with PHP's
+  "Maximum execution time exceeded" fatal error, which Laravel answers with a
+  `500`. PHP-FPM's own limit (`max_execution_time`, 30 s by default) is
+  replaced for the call; under `php artisan serve` PHP has no limit by default,
+  so the setting adds one. The web server has timeouts of its own that this
+  setting cannot raise, such as nginx's `fastcgi_read_timeout` and PHP-FPM's
+  `request_terminate_timeout`; keep them above the time limit.
 - Per-request processes lose the in-memory AST index after every call; an
-  on-disk snapshot (`AGENT_KIT_MCP_INDEX_CACHE_PATH`, empty disables it) lets
-  the next call reuse it instead of rebuilding — see [Index cache](#index-cache).
+  on-disk snapshot (`AGENT_KIT_MCP_INDEX_CACHE_PATH`, on by default, `false`
+  disables it) lets the next call reuse it instead of rebuilding — see
+  [Index cache](#index-cache).
 - No TLS: expose it remotely only behind a reverse proxy that terminates TLS.
 
 ### Authentication
@@ -252,8 +264,9 @@ chunked or of unknown size.
 Concurrency, connection timeouts and TLS are the web server's job now
 (`php artisan serve`, PHP-FPM, Octane, or a reverse proxy in front of them),
 not a setting of this package — see [Streamable HTTP](#streamable-http).
-Execution timeouts still cannot interrupt synchronous PHP analysis; use
-`AGENT_KIT_MCP_HTTP_TIME_LIMIT` and keep projects bounded instead.
+A long analysis is cut short by `AGENT_KIT_MCP_HTTP_TIME_LIMIT` (a `500`) or
+by the web server's own timeouts, whichever comes first; keep analysed
+projects small enough for a call to finish well within both.
 
 ### Status codes
 
@@ -373,19 +386,25 @@ memory (default `1`); this cache is cleared on shutdown.
 
 A per-request process (`php artisan serve`, PHP-FPM) starts with an empty
 in-memory cache on every call, so building the index from scratch (seconds, on
-a real application) would run again and again. `AGENT_KIT_MCP_INDEX_CACHE_PATH`
-points at a directory where the indexer keeps one file per project root
-(`<sha1(root)>.idx`, the fingerprint plus the serialized index). Leaving the
-variable out of `.env` entirely defaults it to
-`storage_path('framework/cache/agent-kit/index')`; an empty value — which is
-what the shipped `.env.example` sets, so the snapshot is off until a path is
-configured — disables it. On a memory miss the indexer reads this file: a
-matching fingerprint returns the index without rebuilding, and a missing,
-unreadable, corrupt or stale file falls back to a rebuild, which then
-overwrites the snapshot. Writes go to a temporary file that is renamed into
-place, so a concurrent reader never sees a partial snapshot. The CLI commands
-and the HTTP route both benefit from this; the stdio server keeps its
-long-lived in-memory cache and only reads the snapshot on its first call.
+a real application) would run again and again. The indexer therefore keeps an
+on-disk snapshot: one file per analysed project root (`<sha1(root)>.idx`, a
+header plus the serialized index) in the directory named by
+`AGENT_KIT_MCP_INDEX_CACHE_PATH`. Unset or empty (as the shipped
+`.env.example` leaves it) means `storage_path('framework/cache/agent-kit/index')`;
+`false` disables snapshots; any other value is the directory to use.
+
+On a memory miss the indexer reads the file's header first: when the
+fingerprint and the context (the facade prefixes, the installed
+`nikic/php-parser` version and the Agent Kit revision) match, it returns the
+index without rebuilding; a missing, unreadable, corrupt or stale file falls
+back to a rebuild, which then overwrites the snapshot. Writes go to a
+temporary file that is renamed into place, so a concurrent reader never sees a
+partial snapshot, and the file is readable according to the process umask, so
+a CLI user and a PHP-FPM user of the same group can share it. To clear the
+snapshots, delete the directory; `php artisan cache:clear` does not touch it,
+and the next call recreates it. The CLI commands and the HTTP route both
+benefit from this; the stdio server keeps its long-lived in-memory cache and
+only reads the snapshot on its first call.
 
 ## Logging and diagnostics
 
@@ -393,10 +412,11 @@ On stdio, logs go to stderr at `AGENT_KIT_MCP_LOG_LEVEL` (default `info`). Set
 `AGENT_KIT_MCP_LOG_CHANNEL` to route them to a channel from `config/logging.php`
 instead; never pick a channel that writes to stdout when using stdio. Set the
 level to `debug` to see tool arguments in the log; production should keep
-`info`. The HTTP route always logs through the application's own log (the
-configured channel, or the application's default channel when none is set),
-governed by that channel's level in `config/logging.php` rather than
-`AGENT_KIT_MCP_LOG_LEVEL`.
+`info`. The HTTP route always logs through the application's own log. On the
+application's default channel (no `AGENT_KIT_MCP_LOG_CHANNEL`), records below
+`AGENT_KIT_MCP_LOG_LEVEL` are dropped before they reach it, and the channel's
+own level in `config/logging.php` still applies on top; a channel named in
+`AGENT_KIT_MCP_LOG_CHANNEL` is governed by that channel's level alone.
 
 Troubleshooting:
 
@@ -410,8 +430,8 @@ Troubleshooting:
   not just the host, so CORS answers with `Access-Control-Allow-Origin`.
 - *`403` on HTTP, "only accepts loopback clients"*: the request's client IP is
   not loopback; set `AGENT_KIT_MCP_ALLOW_REMOTE=true` to accept it, and behind
-  a reverse proxy configure Laravel's `TrustProxies` so `$request->ip()` sees
-  the real client instead of the proxy.
+  a reverse proxy configure Laravel's `TrustProxies` with the proxy's address
+  (not `'*'`) so `$request->ip()` sees the real client instead of the proxy.
 - *`503` on HTTP, "misconfigured"*: the reason (for example a bearer token
   under 32 characters) is written to the application log, never to the
   response; check `storage/logs/laravel.log` or the configured log channel.
@@ -444,7 +464,8 @@ application; keep it off, loopback-only and token-protected outside development.
 - No TLS of its own; concurrency and connection handling are the web server's
   (`php artisan serve` serializes calls with its single default worker;
   PHP-FPM and Octane parallelize them across workers).
-- Execution timeouts cannot preempt a running analysis.
+- Over HTTP, a call that runs past `AGENT_KIT_MCP_HTTP_TIME_LIMIT` is aborted
+  with a `500`, never answered with a partial result; stdio has no time limit.
 
 ## Upgrading the SDK
 
