@@ -31,6 +31,11 @@ jobs:
       - name: Run the suite
         run: vendor/bin/phpunit --colors=never --no-coverage
 
+      # Subprocess tests (MCP server) report their exceptions to the Testbench skeleton's log.
+      - name: Show the Testbench log on failure
+        if: failure()
+        run: cat vendor/orchestra/testbench-core/laravel/storage/logs/laravel.log || true
+
   databases:
     name: Database group (${{ matrix.name }})
     runs-on: ubuntu-latest
