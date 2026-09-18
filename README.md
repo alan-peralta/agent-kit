@@ -20,6 +20,10 @@ php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
 ```
 
+> Laravel 13: um app novo vem com o Guzzle 8, e o Agent Kit ainda exige o Guzzle 7. Acrescente
+> `-W` ao `composer require` para o Composer rebaixar o Guzzle para 7.x, que o Laravel 13 também
+> aceita.
+
 Isso basta para o núcleo de agentes: providers, tools, conversas e RAG. O Refactoring Agent
 e o servidor MCP usam pacotes opcionais, instalados à parte e de preferência só em
 desenvolvimento; veja [Refactoring Agent](#refactoring-agent) e [Servidor MCP](#servidor-mcp).

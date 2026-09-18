@@ -8,7 +8,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não Lançado]
 
 ### Adicionado
-- Suporte ao Laravel 13 (`illuminate/*` `^13.0`; o Laravel 13 exige PHP 8.3). O CI passa a rodar a suíte também no Laravel 13, com todas as dependências na versão mais nova que o `composer.json` permite.
+- Suporte ao Laravel 13 (`illuminate/*` `^13.0`; o Laravel 13 exige PHP 8.3). Um app Laravel 13 novo vem com o Guzzle 8, e o kit ainda exige o Guzzle 7: acrescente `-W` ao `composer require` para o Composer rebaixar o Guzzle, o que o Laravel 13 aceita. O CI passa a rodar a suíte também no Laravel 13, com todas as dependências na versão mais nova que o `composer.json` permite.
 - Knowledge store `database` (`AGENT_KNOWLEDGE_STORE=database`): guarda os embeddings numa tabela comum, como base64 de float32 normalizado, e ranqueia por similaridade de cosseno em PHP. Funciona em MySQL 8 Community, MariaDB, PostgreSQL sem pgvector e SQLite, e é indicado para bases de até alguns milhares de chunks por tenant e coleção. A migration é publicada pela tag `agent-kit-database-store-migrations`. Funciona também com um `config/agent-kit.php` publicado antes desta versão (conexão padrão e tabela `knowledge_chunks`) e rejeita embeddings com valores não finitos.
 - CI no GitHub Actions: suíte completa em SQLite e grupo `database` em MySQL 8.4, MariaDB 11.8 e PostgreSQL 17 com pgvector.
 - Suíte de testes configurável pelas variáveis `AGENT_KIT_TEST_DB_*`, para rodar os testes do grupo `database` contra um servidor real.
