@@ -310,7 +310,7 @@ User (no dia 2, mesma conversa):
 Além da stack de conversas/RAG acima, o pacote tem um segundo módulo independente:
 o **Refactoring Core** (`src/Refactoring/`), que não usa Redis, Database nem
 Knowledge Base. Ele lê o código-fonte de um projeto, constrói um índice AST em
-memória (`nikic/php-parser`) e responde consultas determinísticas de dependência,
+memória (`nikic/php-parser`, dependência opcional) e responde consultas determinísticas de dependência,
 callers e impacto. Nada é persistido: o índice vive no processo e é reconstruído
 quando o fingerprint de conteúdo dos arquivos muda.
 

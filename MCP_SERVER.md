@@ -18,9 +18,15 @@ are identical.
 
 ## Prerequisites
 
-- PHP 8.2+ with `ext-fileinfo`; Laravel 10, 11 or 12 with Agent Kit installed.
-- `mcp/sdk` is installed with the package (pinned to `^0.8.1`, see
-  [Upgrading the SDK](#upgrading-the-sdk)).
+- PHP 8.2+; Laravel 10, 11 or 12 with Agent Kit installed.
+- `mcp/sdk` and `nikic/php-parser`, which Agent Kit only suggests. Install them
+  in development: `composer require --dev mcp/sdk nikic/php-parser`. The SDK
+  needs `ext-fileinfo`, and Agent Kit's `conflict` rule keeps it on `^0.8.1`
+  (see [Upgrading the SDK](#upgrading-the-sdk)).
+- The SDK brings the `php-http/discovery` Composer plugin. Agent Kit passes its
+  PSR-17 factories explicitly and does not need it; to keep it from running,
+  run `composer config allow-plugins.php-http/discovery false` before the
+  `require` (the default Laravel skeleton allows it).
 - Streamable HTTP additionally needs `react/http`:
   `composer require react/http`.
 
@@ -93,7 +99,9 @@ envelope in `structuredContent`:
 ```
 
 Error codes: `INVALID_TARGET`, `TARGET_NOT_FOUND`, `AMBIGUOUS_TARGET`,
-`UNSUPPORTED_TARGET`, `TARGET_OUTSIDE_PROJECT`, `PROJECT_ROOT_NOT_FOUND`.
+`UNSUPPORTED_TARGET`, `TARGET_OUTSIDE_PROJECT`, `PROJECT_ROOT_NOT_FOUND`, and
+`DEPENDENCY_MISSING` (the analyze, callers, dependencies and impact tools need
+`nikic/php-parser`; the message says how to install it).
 Arguments that violate the input schema (missing, empty, wrong type, unknown
 keys) are JSON-RPC `-32602` errors; unknown tool names are `-32602` too. Each
 tool declares an `outputSchema` accepting either envelope.
@@ -348,6 +356,8 @@ Troubleshooting:
 - *`Refusing to bind ... --allow-remote`*: non-loopback binds are opt-in.
 - *`Could not bind the MCP HTTP transport ... Use an IP literal`*: `--host`
   resolved to a hostname other than `localhost`; pass an IP literal instead.
+- *`The MCP server requires mcp/sdk`*: `composer require --dev mcp/sdk nikic/php-parser`.
+- *`DEPENDENCY_MISSING` from a tool*: `composer require --dev nikic/php-parser`.
 - *`requires react/http`*: `composer require react/http`.
 
 ## Security model
@@ -371,8 +381,11 @@ HTTP and no shell execution.
 
 ## Upgrading the SDK
 
-`mcp/sdk` is pre-1.0 and its minor releases contain breaking changes; the
-package pins `^0.8.1` (`>=0.8.1 <0.9.0`). Before moving to a new minor, re-check
+`mcp/sdk` is pre-1.0 and its minor releases contain breaking changes. Agent Kit
+tests against `^0.8.1` (`require-dev`) and, because applications install the
+SDK themselves, holds them to the same range with
+`"conflict": {"mcp/sdk": "<0.8.1 || >=0.9"}`; move both constraints together.
+Before moving to a new minor, re-check
 the constructor signatures used here: `Mcp\Server\Builder::add()`,
 `Mcp\Schema\Tool`, `Mcp\Schema\Result\CallToolResult`,
 `Mcp\Server\Transport\StdioTransport`, `Mcp\Server\Transport\StreamableHttpTransport`,

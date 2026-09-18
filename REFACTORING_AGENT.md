@@ -18,6 +18,17 @@ php artisan agent-kit:refactor-impact "App\Services\PaymentService::charge"
 `refactor-capabilities` lists every capability with its MCP tool name and CLI
 fallback; the generated skills call it first.
 
+`refactor-capabilities` and `refactor-audit` work with a default install.
+`refactor-analyze`, `refactor-callers`, `refactor-dependencies` and
+`refactor-impact` build the AST index and need `nikic/php-parser` 5.x, which
+Agent Kit only suggests. PHPUnit usually brings it into development already;
+otherwise run `composer require --dev nikic/php-parser`. Without it those
+commands fail with the `DEPENDENCY_MISSING` error code:
+
+```json
+{"schema_version": "1.0", "error": {"code": "DEPENDENCY_MISSING", "message": "The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser. Install it with: composer require --dev nikic/php-parser"}}
+```
+
 The graph commands accept `--path=/path/to/project` and default to the Laravel
 base path. Add `--json` to emit deterministic structured output without tables.
 For audit, the project root is the optional positional argument. Its reports
@@ -137,7 +148,7 @@ Thresholds and excluded directories are configurable under `agent-kit.refactorin
 
 ## AST structural analysis
 
-The structural analyzer uses `nikic/php-parser` rather than regular expressions.
+The structural analyzer uses `nikic/php-parser` (optional, see [Commands](#commands)) rather than regular expressions.
 Each included PHP file is parsed once while an in-memory index is built:
 
 ```text

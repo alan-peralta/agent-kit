@@ -3,7 +3,9 @@
 namespace Peralta\AgentKit\Tests\Feature\Refactoring;
 
 use Illuminate\Support\Facades\Artisan;
+use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpParserRequirement;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParsedFile;
 use Peralta\AgentKit\Refactoring\Application\DefaultRefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
@@ -185,6 +187,31 @@ final class RefactoringCommandsTest extends TestCase
             'error' => [
                 'code' => 'TARGET_NOT_FOUND',
                 'message' => 'Class not found: Missing\\Service',
+            ],
+        ], json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR));
+    }
+
+    public function test_json_reports_a_missing_parser_with_the_dependency_missing_envelope(): void
+    {
+        $this->app->bind(AstParser::class, fn () => new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                throw MissingDependencyException::forFeature(PhpParserRequirement::FEATURE, PhpParserRequirement::PACKAGE);
+            }
+        });
+
+        $status = Artisan::call('agent-kit:refactor-analyze', [
+            'file' => 'Fixtures\\Payments\\PaymentService',
+            '--path' => $this->fixtureRoot(),
+            '--json' => true,
+        ]);
+
+        self::assertSame(1, $status);
+        self::assertSame([
+            'schema_version' => '1.0',
+            'error' => [
+                'code' => 'DEPENDENCY_MISSING',
+                'message' => 'The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser. Install it with: composer require --dev nikic/php-parser',
             ],
         ], json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR));
     }

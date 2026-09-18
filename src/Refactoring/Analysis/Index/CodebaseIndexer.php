@@ -2,6 +2,7 @@
 
 namespace Peralta\AgentKit\Refactoring\Analysis\Index;
 
+use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParseDiagnostic;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\Reference;
@@ -34,6 +35,9 @@ final class CodebaseIndexer implements CodebaseIndexBuilder
             $relative = ProjectRoot::relative($root, $file);
             try {
                 $parsed = $this->parser->parse($file, $relative);
+            } catch (MissingDependencyException $missing) {
+                // A missing package breaks every file the same way: report it once, not per file.
+                throw $missing;
             } catch (\Throwable $failure) {
                 // One unreadable or unanalysable file must not abort the whole index. The
                 // diagnostic keeps only basenames from the exception message and never adds
