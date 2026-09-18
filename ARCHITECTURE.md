@@ -327,6 +327,8 @@ quando o fingerprint de conteúdo dos arquivos muda.
 
 Detalhes em [REFACTORING_AGENT.md](REFACTORING_AGENT.md) e [MCP_SERVER.md](MCP_SERVER.md).
 
+---
+
 ## 🔗 Próximas Leituras
 
 - Ver [SETUP.md](SETUP.md) para configuração prática
