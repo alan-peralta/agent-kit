@@ -213,6 +213,9 @@ return [
             'bootstrap/cache',
             'node_modules',
             '.git',
+            // Worktrees that coding agents (Claude Code, superpowers) keep inside the project.
+            '.claude',
+            '.worktrees',
         ],
         'thresholds' => [
             'large_class_lines' => 500,

@@ -90,6 +90,11 @@ respondem com o código de erro `DEPENDENCY_MISSING`, sempre com o comando de in
 O SDK traz o plugin do Composer `php-http/discovery`, que o kit não usa; veja em
 [MCP_SERVER.md](MCP_SERVER.md#prerequisites) como recusá-lo antes do `require`.
 
+Vindo da v0.3.x ou anterior: o Refactoring Agent passou a ignorar `.claude` e `.worktrees`,
+onde agentes de código guardam worktrees completas do projeto. Se você publicou o
+`config/agent-kit.php`, acrescente as duas pastas a `refactoring.exclude`: a lista publicada
+substitui a do pacote.
+
 Vindo da v0.3.x ou anterior: quem usava o transporte HTTP do servidor MCP
 (`agent-kit:mcp --transport=http`) precisa migrar para a rota da própria aplicação.
 Habilite `AGENT_KIT_MCP_HTTP_ENABLED=true` e um `AGENT_KIT_MCP_BEARER_TOKEN` no `.env`,

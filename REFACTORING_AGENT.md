@@ -332,7 +332,11 @@ static/Facade call. Dynamic strings and expressions are not guessed.
 
 `ProjectScanner` applies the same configured exclusions to audit and AST
 indexing. Defaults exclude `vendor`, `storage`, `bootstrap/cache`,
-`node_modules`, and `.git`. File discovery occurs once and each included PHP
+`node_modules`, `.git`, `.claude`, and `.worktrees`, where coding agents keep full
+checkouts of the project. Each exclusion is a path relative to the project root
+(`vendor` does not exclude `packages/foo/vendor`), and excluded directories are
+never entered, so their size does not slow the scan. File discovery occurs once
+and each included PHP
 file is parsed once per index build. Declaration and reverse-reference maps
 avoid rescanning for each query.
 

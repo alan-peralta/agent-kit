@@ -3,8 +3,10 @@
 namespace Peralta\AgentKit\Refactoring\Support;
 
 use FilesystemIterator;
+use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use SplFileInfo;
 
 final class ProjectScanner
 {
@@ -22,7 +24,14 @@ final class ProjectScanner
 
         $files = [];
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            // Prune excluded directories instead of filtering their files afterwards: a vendor
+            // tree or an agent's worktrees can hold hundreds of thousands of files. The prune sees
+            // the traversal path, not the canonical one; a file inside the root is always also
+            // reachable through its own link-free path, so the canonical check below decides.
+            new RecursiveCallbackFilterIterator(
+                new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+                fn (SplFileInfo $entry): bool => !$entry->isDir() || !$this->isExcluded($entry->getPathname(), $root),
+            ),
             RecursiveIteratorIterator::LEAVES_ONLY,
         );
 
