@@ -3,7 +3,7 @@
     "description": "AI agents toolkit for Laravel with multi-provider support, tools and RAG.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["laravel", "ai", "agents", "openai", "anthropic", "gemini", "deepseek", "rag", "pgvector"],
+    "keywords": ["laravel", "ai", "agents", "openai", "anthropic", "gemini", "deepseek", "rag", "pgvector", "mysql", "mariadb", "postgresql"],
     "authors": [
         {
             "name": "Peralta"

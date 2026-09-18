@@ -7,6 +7,14 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não Lançado]
 
+### Adicionado
+- Knowledge store `database` (`AGENT_KNOWLEDGE_STORE=database`): guarda os embeddings numa tabela comum, como base64 de float32 normalizado, e ranqueia por similaridade de cosseno em PHP. Funciona em MySQL 8 Community, MariaDB, PostgreSQL sem pgvector e SQLite, e é indicado para bases de até alguns milhares de chunks por tenant e coleção. A migration é publicada pela tag `agent-kit-database-store-migrations`.
+- CI no GitHub Actions: suíte completa em SQLite e grupo `database` em MySQL 8.4, MariaDB 11.8 e PostgreSQL 17 com pgvector.
+- Suíte de testes configurável pelas variáveis `AGENT_KIT_TEST_DB_*`, para rodar os testes do grupo `database` contra um servidor real.
+
+### Alterado
+- A migration do `knowledge_chunks` para pgvector saiu da tag `agent-kit-migrations` e passou para `agent-kit-pgvector-migrations`. O `php artisan migrate` deixa de exigir PostgreSQL com pgvector de quem usa MySQL, MariaDB, SQLite ou Qdrant. Instalações novas com pgvector publicam as duas tags; quem já publicou as migrations não precisa fazer nada.
+
 ## [0.3.0] - 2026-09-18
 
 ### Adicionado

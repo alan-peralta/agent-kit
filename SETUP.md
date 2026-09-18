@@ -1,12 +1,12 @@
 # 🚀 Guia Completo de Configuração - Agent Kit + RAG
 
-Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (Knowledge Base).
+Configuração passo a passo para usar Agent Kit com PostgreSQL + Redis + RAG (Knowledge Base). Para MySQL ou MariaDB, siga as notas "MySQL/MariaDB" dos Passos 1 e 3.
 
 ## ✅ Pré-requisitos
 
 - Laravel 10+ (suporta 10, 11, 12)
 - PHP 8.2+
-- PostgreSQL com extensão pgvector
+- PostgreSQL com extensão pgvector, ou MySQL/MariaDB com o store `database` ou Qdrant
 - Redis
 - Uma API de LLM (OpenAI, Anthropic, Gemini ou DeepSeek)
 
@@ -22,7 +22,11 @@ composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent
 composer require peralta/agent-kit:^0.3
 php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
+php artisan vendor:publish --tag=agent-kit-pgvector-migrations
 ```
+
+> MySQL/MariaDB: troque a tag do pgvector por `agent-kit-database-store-migrations` para
+> usar o store `database`, ou não publique nenhuma tag de knowledge base se for usar Qdrant.
 
 Alternativa mais curta para um checkout local do pacote:
 
@@ -47,7 +51,7 @@ OPENAI_API_KEY=sk-xxxxx              # necessário para embeddings do RAG
 AGENT_CONVERSATION_DRIVER=redis
 AGENT_CONVERSATION_REDIS=default
 
-# Knowledge Base (PostgreSQL + pgvector; Qdrant é alternativa de store, mas a migration do pgvector continua sendo executada)
+# Knowledge Base: pgvector (PostgreSQL), database (MySQL, MariaDB, PostgreSQL ou SQLite) ou qdrant
 AGENT_KNOWLEDGE_STORE=pgvector
 AGENT_KNOWLEDGE_DB=pgsql
 AGENT_EMBEDDER=openai
@@ -82,11 +86,15 @@ AGENT_KIT_MCP_HTTP_ENABLED=false
 
 ## 🗄️ Passo 3: Rodar as migrations
 
-> ⚠️ Este passo exige o PostgreSQL com pgvector **já rodando e configurado** como a
+> ⚠️ Com a tag `agent-kit-pgvector-migrations` publicada, este passo exige o PostgreSQL com pgvector **já rodando e configurado** como a
 > conexão `pgsql` (ou a de `AGENT_KNOWLEDGE_DB`). Num app Laravel 11/12 novo, que vem
 > com `DB_CONNECTION=sqlite`, o comando falha com
 > `SQLSTATE[HY000]: General error: 1 near "EXTENSION": syntax error`.
 > A verificação do Passo 4 acontece depois da migration — confirme o banco antes.
+
+> MySQL/MariaDB: sem a tag do pgvector, o `migrate` cria as tabelas do pacote no banco
+> padrão da aplicação, e a `knowledge_chunks` só se você publicou
+> `agent-kit-database-store-migrations`.
 
 ```bash
 php artisan migrate
@@ -94,12 +102,13 @@ php artisan migrate
 
 Isso cria:
 1. **Tabela `agent_messages`** - Histórico de mensagens
-2. **Tabela `knowledge_chunks`** - Documentos indexados para RAG
-3. **Extensão `pgvector`** no PostgreSQL - Para busca semântica
+2. **Tabela `agent_kit_metrics`** - Métricas de uso (gravadas com `AGENT_KIT_ANALYTICS_PERSIST=true`)
+3. **Tabela `knowledge_chunks`** - Documentos indexados para RAG (pgvector ou store `database`)
+4. **Extensão `pgvector`** no PostgreSQL - Só com a tag do pgvector
 
 ---
 
-## ✔️ Passo 4: Verificar pgvector
+## ✔️ Passo 4: Verificar pgvector (somente pgvector)
 
 Confirme que pgvector foi instalado corretamente:
 
@@ -356,8 +365,8 @@ bastando habilitar via `.env`:
 - **Eventos de analytics** (uso de tokens, tool calls, latência, retries), com
   persistência opcional na tabela `agent_kit_metrics`.
 
-A tabela `agent_kit_metrics` já foi criada no Passo 3: as três migrations do pacote
-compartilham a mesma tag `agent-kit-migrations`. Para persistir métricas, basta
+A tabela `agent_kit_metrics` já foi criada no Passo 3: ela vem na tag
+`agent-kit-migrations`, junto com `agent_messages`. Para persistir métricas, basta
 ligar `AGENT_KIT_ANALYTICS_PERSIST=true` no `.env`.
 
 Ajuste as políticas de retry por tipo de erro e as opções de analytics em
@@ -396,7 +405,7 @@ Usuário envia: "Quero um produto barato e também saber as políticas"
 - [ ] Composer instalado
 - [ ] Migrations rodadas
 - [ ] `.env` configurado
-- [ ] PostgreSQL com pgvector
+- [ ] PostgreSQL com pgvector, ou store `database`/Qdrant no MySQL/MariaDB
 - [ ] Redis rodando
 - [ ] Tool customizada criada
 - [ ] Documentos indexados
