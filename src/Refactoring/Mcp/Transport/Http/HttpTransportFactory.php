@@ -18,12 +18,12 @@ use Throwable;
 final class HttpTransportFactory
 {
     public function __construct(
-        private readonly HttpServerOptions $options,
+        private readonly HttpTransportOptions $options,
         private readonly ResponseFactoryInterface $responses,
         private readonly StreamFactoryInterface $streams,
     ) {}
 
-    public static function fromOptions(HttpServerOptions $options): self
+    public static function fromOptions(HttpTransportOptions $options): self
     {
         $factory = new HttpFactory();
 
@@ -71,10 +71,6 @@ final class HttpTransportFactory
 
     public function handle(Server $server, ServerRequestInterface $request, LoggerInterface $logger): ResponseInterface
     {
-        if ($request->getUri()->getPath() !== $this->options->path) {
-            return $this->json(404, ['error' => 'not_found', 'message' => 'The MCP endpoint is ' . $this->options->path . '.']);
-        }
-
         try {
             $response = $server->run($this->create($request, $logger));
             if (!$response instanceof ResponseInterface) {

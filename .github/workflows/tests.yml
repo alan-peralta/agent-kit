@@ -23,9 +23,9 @@ jobs:
           # The lock: Laravel 12 with Testbench 10.
           - name: SQLite
             composer: install
-          # Every dependency at the newest version composer.json allows, on Laravel 13.
-          - name: Laravel 13
-            composer: update --with laravel/framework:^13.0 --with orchestra/testbench:^11.0
+          # Every dependency at the newest version composer.json allows, on Laravel 13 with Guzzle 8.
+          - name: Laravel 13, Guzzle 8
+            composer: update --with laravel/framework:^13.0 --with orchestra/testbench:^11.0 --with guzzlehttp/guzzle:^8.0
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +40,9 @@ jobs:
 
       - name: Show the resolved Laravel version
         run: composer show laravel/framework | grep '^versions'
+
+      - name: Show the resolved Guzzle version
+        run: composer show guzzlehttp/guzzle | grep '^versions'
 
       - name: Run the suite
         run: vendor/bin/phpunit --colors=never --no-coverage

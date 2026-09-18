@@ -15,7 +15,7 @@
         "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
         "illuminate/database": "^10.0|^11.0|^12.0|^13.0",
         "illuminate/http": "^10.0|^11.0|^12.0|^13.0",
-        "guzzlehttp/guzzle": "^7.0"
+        "guzzlehttp/guzzle": "^7.0|^8.0"
     },
     "conflict": {
         "mcp/sdk": "<0.8.1 || >=0.9"
@@ -30,16 +30,14 @@
         "nikic/php-parser": "^5.8",
         "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
         "phpunit/phpunit": "^10.0|^11.0",
-        "pgvector/pgvector": "^0.2",
-        "react/http": "^1.11"
+        "pgvector/pgvector": "^0.2"
     },
     "suggest": {
-        "mcp/sdk": "Required by the MCP server (php artisan agent-kit:mcp), ^0.8.1; install it with --dev",
+        "mcp/sdk": "Required by the MCP server (php artisan agent-kit:mcp and the Streamable HTTP route), ^0.8.1; install it with --dev",
         "nikic/php-parser": "Required by the Refactoring Agent's AST capabilities (analyze, callers, dependencies, impact), ^5.0; install it with --dev",
         "pgvector/pgvector": "Required for pgvector knowledge store",
         "smalot/pdfparser": "For extracting text from PDF documents",
-        "phpoffice/phpword": "For extracting text from DOCX documents",
-        "react/http": "Required to serve the MCP server over Streamable HTTP (php artisan agent-kit:mcp --transport=http)"
+        "phpoffice/phpword": "For extracting text from DOCX documents"
     },
     "autoload": {
         "psr-4": {

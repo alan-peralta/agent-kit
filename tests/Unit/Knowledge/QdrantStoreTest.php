@@ -104,6 +104,23 @@ class QdrantStoreTest extends TestCase
         }
     }
 
+    public function test_default_client_headers_never_reach_qdrant(): void
+    {
+        [$client, $history] = $this->client(
+            [new Response(200, [], '{"result":{"points":[]}}')],
+            ['Authorization' => 'Bearer inherited', 'api-key' => 'inherited', 'X-Trace' => 'inherited'],
+        );
+
+        (new QdrantStore('http://qdrant.test', client: $client))->search([1], 'tenant');
+
+        $request = $history[0]['request'];
+        self::assertFalse($request->hasHeader('Authorization'));
+        self::assertFalse($request->hasHeader('api-key'));
+        self::assertFalse($request->hasHeader('X-Trace'));
+        self::assertSame('application/json', $request->getHeaderLine('Accept'));
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+    }
+
     public function test_it_retries_retryable_responses_at_most_twice(): void
     {
         [$client, $history] = $this->client([

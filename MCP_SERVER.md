@@ -12,6 +12,11 @@ MCP client → transport (stdio | Streamable HTTP) → mcp/sdk Server
           → Refactoring\Mcp adapter → RefactoringCapabilities → AST index
 ```
 
+Streamable HTTP is not a separate listener process: enabling it registers a
+route (`agent-kit.mcp`, `McpHttpController`) in the host Laravel application,
+served by whatever already serves the rest of the app (`php artisan serve`,
+PHP-FPM, Octane).
+
 The CLI (`php artisan agent-kit:refactor-*`) and the MCP server are independent
 adapters over the same `RefactoringCapabilities` contract; the JSON envelopes
 are identical.
@@ -27,8 +32,8 @@ are identical.
   PSR-17 factories explicitly and does not need it; to keep it from running,
   run `composer config allow-plugins.php-http/discovery false` before the
   `require` (the default Laravel skeleton allows it).
-- Streamable HTTP additionally needs `react/http`:
-  `composer require react/http`.
+- Streamable HTTP needs no extra package: it runs on the application's own
+  Laravel HTTP stack and the PSR-7 bridge Agent Kit already ships.
 
 ## Configuration
 
@@ -36,22 +41,20 @@ are identical.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `AGENT_KIT_MCP_ENABLED` | `true` | `false` makes `agent-kit:mcp` refuse to start |
-| `AGENT_KIT_MCP_TRANSPORT` | `stdio` | default transport when `--transport` is omitted |
-| `AGENT_KIT_MCP_PROJECT_ROOT` | *(empty = base path)* | project root when `--path` is omitted |
-| `AGENT_KIT_MCP_HTTP_ENABLED` | `false` | opt-in for Streamable HTTP |
-| `AGENT_KIT_MCP_HTTP_HOST` | `127.0.0.1` | bind host (`--host` overrides) |
-| `AGENT_KIT_MCP_HTTP_PORT` | `8787` | bind port (`--port` overrides) |
-| `AGENT_KIT_MCP_HTTP_PATH` | `/mcp` | the single MCP endpoint |
-| `AGENT_KIT_MCP_ALLOW_REMOTE` | `false` | allow non-loopback binds (`--allow-remote` overrides) |
+| `AGENT_KIT_MCP_ENABLED` | `true` | `false` makes `agent-kit:mcp` refuse to start and hides the HTTP route |
+| `AGENT_KIT_MCP_TRANSPORT` | `stdio` | default transport when `--transport` is omitted; `http` exits `1` (see [Streamable HTTP](#streamable-http)) |
+| `AGENT_KIT_MCP_PROJECT_ROOT` | *(empty = base path)* | project root when `--path` is omitted, and the root the HTTP route analyzes |
+| `AGENT_KIT_MCP_HTTP_ENABLED` | `false` | opt-in; registers the `agent-kit.mcp` route |
+| `AGENT_KIT_MCP_HTTP_PATH` | `/mcp` | the single MCP endpoint, appended to the application's URL |
+| `AGENT_KIT_MCP_ALLOW_REMOTE` | `false` | accept non-loopback client IPs |
 | `AGENT_KIT_MCP_ALLOWED_ORIGINS` | *(empty)* | comma-separated extra allowed hosts; entries with a scheme also enable CORS for that exact origin |
 | `AGENT_KIT_MCP_BEARER_TOKEN` | *(empty)* | required for HTTP, 32+ characters |
-| `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` … `AGENT_KIT_MCP_HTTP_MAX_SESSIONS` | see [Limits](#limits-and-lifecycle) | request and session bounds |
-| `AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES` | `1` | cached roots per process |
-| `AGENT_KIT_MCP_LOG_LEVEL` / `AGENT_KIT_MCP_LOG_CHANNEL` | `info` / *(stderr)* | logging |
+| `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` / `_SESSION_TTL` / `_CACHE_STORE` / `_TIME_LIMIT` | see [Limits and lifecycle](#limits-and-lifecycle) | request bound, session lifetime, cache store and PHP time limit |
+| `AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES` | `1` | in-memory cached roots per process |
+| `AGENT_KIT_MCP_INDEX_CACHE_PATH` | *(empty = `storage_path('framework/cache/agent-kit/index')`)* | directory of the on-disk AST index snapshot shared across per-request processes; `false` disables it (see [Index cache](#index-cache)) |
+| `AGENT_KIT_MCP_LOG_LEVEL` / `AGENT_KIT_MCP_LOG_CHANNEL` | `info` / *(stderr for stdio)* | logging |
 
-Command options: `--transport=stdio|http`, `--path=`, `--host=`, `--port=`,
-`--allow-remote`.
+Command options: `--transport=stdio|http`, `--path=`.
 
 ## Tools
 
@@ -136,27 +139,71 @@ single stdio session never expires.
 
 ## Streamable HTTP
 
-HTTP is opt-in and secure by default:
+HTTP is opt-in and secure by default. It is not a listener process: enabling it
+registers a route (`agent-kit.mcp`, `McpHttpController`) in the host Laravel
+application, served by whatever already serves the rest of the app.
+`agent-kit:mcp` itself serves stdio only; `--transport=http` (or
+`AGENT_KIT_MCP_TRANSPORT=http`) exits `1` with a message pointing here instead
+of trying to listen.
 
 ```bash
-export AGENT_KIT_MCP_HTTP_ENABLED=true
-export AGENT_KIT_MCP_BEARER_TOKEN="$(php -r 'echo bin2hex(random_bytes(32));')"
-php artisan agent-kit:mcp --transport=http --path=/absolute/path/to/project --host=127.0.0.1 --port=8787
-# endpoint: http://127.0.0.1:8787/mcp
+# .env — generate the token with: php -r 'echo bin2hex(random_bytes(32));'
+AGENT_KIT_MCP_HTTP_ENABLED=true
+AGENT_KIT_MCP_BEARER_TOKEN=<32+ characters>
 ```
 
-- One endpoint (`AGENT_KIT_MCP_HTTP_PATH`, default `/mcp`) serving `POST`,
-  `DELETE` and `OPTIONS`; `GET` answers `405` (this server never initiates
-  messages, so there is no standalone SSE stream).
-- Binds `127.0.0.1` by default; `--host=localhost` also binds `127.0.0.1`
-  (ReactPHP's `SocketServer` binds IP literals only, never hostnames). Any
-  other host requires `--allow-remote` (or `AGENT_KIT_MCP_ALLOW_REMOTE=true`)
-  and must be an IP literal — a non-loopback hostname is refused at start-up
-  with `Could not bind the MCP HTTP transport … Use an IP literal`; the bearer
-  token stays mandatory either way.
-- A persistent single-threaded process built on ReactPHP: the AST index is
-  reused across calls and invalidated by content fingerprint. Tool execution
-  blocks the loop, so keep `AGENT_KIT_MCP_HTTP_MAX_CONCURRENT` small.
+```bash
+php artisan serve
+# endpoint: <APP_URL><AGENT_KIT_MCP_HTTP_PATH>, e.g. http://127.0.0.1:8000/mcp
+```
+
+- The endpoint is `config('app.url')` (`APP_URL`) plus `AGENT_KIT_MCP_HTTP_PATH`
+  (default `/mcp`), serving `POST`, `DELETE` and `OPTIONS`; `GET` answers `405`
+  (this server never initiates messages, so there is no standalone SSE stream).
+- `php artisan serve` is a single worker by default: it handles one request at
+  a time, so a second MCP call waits for the first one to finish. Under
+  PHP-FPM or Laravel Octane the application serves several requests
+  concurrently, one worker per request; concurrency, request timeouts and TLS
+  are then the web server's job, not this package's.
+- Loopback-only by default: a request whose client IP (`$request->ip()`) is
+  not `127.0.0.0/8` or `::1` gets `403` unless `AGENT_KIT_MCP_ALLOW_REMOTE=true`.
+  This guards against accidental exposure; it is not authentication. A reverse
+  proxy on the same host connects from loopback, so unless Laravel's
+  `TrustProxies` trusts it, every client it forwards looks local. Trusting
+  `'*'` goes too far the other way: any client can then claim a loopback
+  address in `X-Forwarded-For`. Trust only your proxy's address, and treat the
+  bearer token as the real boundary.
+- Enabling this on a deployed environment exposes read-only source analysis to
+  anyone who holds the token and can reach the application (and, with
+  `AGENT_KIT_MCP_ALLOW_REMOTE=true`, from any IP): keep it off in production
+  and enable it only on development machines.
+- The route is registered from `agent-kit.mcp.enabled` and
+  `agent-kit.mcp.http.enabled` when the service provider boots, which respects
+  `php artisan route:cache`; run `route:cache` again after enabling HTTP or
+  changing `AGENT_KIT_MCP_HTTP_PATH` on an application with a cached route
+  table, or the change will not take effect.
+- Sessions live in the Laravel cache (`Cache::store()`, driven by
+  `AGENT_KIT_MCP_HTTP_CACHE_STORE`, empty = the application's default store),
+  prefixed `agent-kit-mcp-session-` and expiring after
+  `AGENT_KIT_MCP_HTTP_SESSION_TTL` idle seconds. The `array` store does not
+  survive between requests, so on a per-request process (`php artisan serve`,
+  PHP-FPM) every session is lost as soon as the response that created it is
+  sent; point `AGENT_KIT_MCP_HTTP_CACHE_STORE` at `file`, `redis`, `database`
+  or another persistent store for real use.
+- `AGENT_KIT_MCP_HTTP_TIME_LIMIT` (default `120`) sets PHP's execution time
+  limit (`set_time_limit`) for the MCP request and restores the previous value
+  afterwards, so under Octane the limit is restored after each MCP call; `0`
+  leaves PHP's own limit alone. Exceeding it aborts the call with PHP's
+  "Maximum execution time exceeded" fatal error, which Laravel answers with a
+  `500`. PHP-FPM's own limit (`max_execution_time`, 30 s by default) is
+  replaced for the call; under `php artisan serve` PHP has no limit by default,
+  so the setting adds one. The web server has timeouts of its own that this
+  setting cannot raise, such as nginx's `fastcgi_read_timeout` and PHP-FPM's
+  `request_terminate_timeout`; keep them above the time limit.
+- Per-request processes lose the in-memory AST index after every call; an
+  on-disk snapshot (`AGENT_KIT_MCP_INDEX_CACHE_PATH`, on by default, `false`
+  disables it) lets the next call reuse it instead of rebuilding — see
+  [Index cache](#index-cache).
 - No TLS: expose it remotely only behind a reverse proxy that terminates TLS.
 
 ### Authentication
@@ -168,20 +215,23 @@ query string is never read and the token is never logged or echoed. The one
 exception is `OPTIONS` (CORS preflight): browsers never attach `Authorization`
 to a preflight request, so it is answered `204` without checking the token —
 it still passes the CORS and Origin/Host allowlist checks below; every other
-method requires the token. Rotate by changing the variable and restarting the
-listener (sessions are in memory). The validator implements the SDK
-`AuthorizationTokenValidatorInterface`, so a JWT/OAuth resource-server
-validator can replace it in a future release.
+method requires the token. Rotate by changing the variable: there is no
+listener to restart, the next request simply reads the new value from config.
+Sessions live in the Laravel cache, not in the token validator, so rotating
+the token does not by itself invalidate open sessions. The validator
+implements the SDK `AuthorizationTokenValidatorInterface`, so a JWT/OAuth
+resource-server validator can replace it in a future release.
 
 ### Allowed origins and DNS rebinding
 
 The SDK `DnsRebindingProtectionMiddleware` enforces a host allowlist:
-`localhost`, `127.0.0.1`, `[::1]`, plus `AGENT_KIT_MCP_ALLOWED_ORIGINS`
-(comma-separated hosts or origins, reduced to their host) and the bind host when
-`--allow-remote` is used. A request with an `Origin` whose host is not listed is
-`403`; without `Origin`, the `Host` header must be listed. `OPTIONS` requests
-pass through this same allowlist before being answered. Remote clients must
-therefore address the server through an allowlisted hostname.
+`localhost`, `127.0.0.1`, `[::1]`, the host of `APP_URL`, plus
+`AGENT_KIT_MCP_ALLOWED_ORIGINS` (comma-separated hosts or origins, reduced to
+their host). A request with an `Origin` whose host is not listed is `403`;
+without `Origin`, the `Host` header must be listed. `OPTIONS` requests pass
+through this same allowlist before being answered. A remote client (with
+`AGENT_KIT_MCP_ALLOW_REMOTE=true`) must therefore address the application
+through an allowlisted hostname.
 
 An entry of `AGENT_KIT_MCP_ALLOWED_ORIGINS` does two different things depending
 on whether it carries a scheme:
@@ -203,22 +253,20 @@ request itself is allowlisted. Scheme, host and port must match exactly;
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` | `1048576` | `413` above this size (SDK and ReactPHP caps agree) |
-| `AGENT_KIT_MCP_HTTP_MAX_CONCURRENT` | `4` | queued requests beyond this wait |
-| `AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT` | `60` | idle connections are closed |
+| `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` | `1048576` | `413` above this size |
 | `AGENT_KIT_MCP_HTTP_SESSION_TTL` | `3600` | sessions expire after idle seconds |
-| `AGENT_KIT_MCP_HTTP_MAX_SESSIONS` | `100` | oldest session evicted beyond this |
 
-A `POST` whose declared `Content-Length` exceeds
-`AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES` is rejected with `413` before any
-buffering. A chunked or unknown-size body that exceeds the limit has no
-`Content-Length` to check up front; ReactPHP discards it once the limit is
-crossed (memory stays bounded) and the server sees an empty message, which is
-answered with a JSON-RPC error rather than `413`.
+The SDK transport reads the `POST` body itself with a bound of
+`AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES`, so a body over the limit is rejected with
+`413` the same way whether `Content-Length` was declared or the body is
+chunked or of unknown size.
 
-`SIGINT`/`SIGTERM` close the socket, destroy sessions, clear the index cache and
-exit `0`. Execution timeouts cannot interrupt synchronous PHP analysis; keep
-projects and concurrency bounded instead.
+Concurrency, connection timeouts and TLS are the web server's job now
+(`php artisan serve`, PHP-FPM, Octane, or a reverse proxy in front of them),
+not a setting of this package — see [Streamable HTTP](#streamable-http).
+A long analysis is cut short by `AGENT_KIT_MCP_HTTP_TIME_LIMIT` (a `500`) or
+by the web server's own timeouts, whichever comes first; keep analysed
+projects small enough for a call to finish well within both.
 
 ### Status codes
 
@@ -226,18 +274,19 @@ projects and concurrency bounded instead.
 |---------|--------|
 | `OPTIONS` (no bearer check; still passes CORS/Origin/Host allowlist) | `204` |
 | Disallowed `Origin`/`Host` | `403` |
+| Non-loopback client IP, `AGENT_KIT_MCP_ALLOW_REMOTE` not set | `403` |
+| Misconfigured (for example a bearer token under 32 characters) | `503` |
 | Missing/invalid bearer token | `401` |
 | Malformed `Authorization` header | `400` |
 | `GET` | `405` (`Allow: POST, DELETE, OPTIONS`) |
-| `POST` with declared `Content-Length` over the limit | `413` |
-| Chunked/unknown-size body over the limit | discarded by ReactPHP; answered as an empty JSON-RPC message, not `413` |
+| `POST` body over `AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES`, declared or chunked | `413` |
 | Invalid JSON | JSON-RPC `-32700` in the body |
 | Unsupported `MCP-Protocol-Version` | `400` |
 | Missing or malformed `Mcp-Session-Id` | `400` |
 | Unknown or expired session | `404` |
 | `DELETE` with a session | `200`; without | `400` |
-| Path other than the endpoint | `404` |
-| Internal failure | `500` with a fixed JSON body, details only on stderr |
+| Path other than the endpoint | `404` (the route simply does not match) |
+| Internal failure | `500` with a fixed JSON body, details only in the application log |
 | `Accept` header | not validated by `mcp/sdk` 0.8.x on the handshake transport; send `Accept: application/json, text/event-stream` anyway (the SDK client does) |
 
 ## Client configuration
@@ -303,8 +352,8 @@ npx @modelcontextprotocol/inspector --cli --config .mcp.json --server agent-kit-
 # Interactive UI
 npx @modelcontextprotocol/inspector --config .mcp.json --server agent-kit-refactoring
 
-# Streamable HTTP (listener already running):
-npx @modelcontextprotocol/inspector http://127.0.0.1:8787/mcp
+# Streamable HTTP (route already served, e.g. `php artisan serve`):
+npx @modelcontextprotocol/inspector http://127.0.0.1:8000/mcp
 ```
 
 For HTTP, add the header `Authorization: Bearer <token>` in the Inspector UI.
@@ -313,7 +362,7 @@ The Inspector is a development tool, not a dependency of this package.
 ### Generic Streamable HTTP client
 
 ```bash
-curl -s http://127.0.0.1:8787/mcp \
+curl -s http://127.0.0.1:8000/mcp \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -331,17 +380,43 @@ already prefer these tools and fall back to the `--json` CLI.
 
 The server keeps the AST index in memory per project root. Before every call it
 computes a content fingerprint (`xxh128` of every included PHP file) and rebuilds
-the index when any file was created, modified or removed. Nothing is written to
-disk; the cache is cleared on shutdown. `AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES`
-bounds the number of roots kept (default `1`).
+the index when any file was created, modified or removed.
+`AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES` bounds the number of roots kept in
+memory (default `1`); this cache is cleared on shutdown.
+
+A per-request process (`php artisan serve`, PHP-FPM) starts with an empty
+in-memory cache on every call, so building the index from scratch (seconds, on
+a real application) would run again and again. The indexer therefore keeps an
+on-disk snapshot: one file per analysed project root (`<sha1(root)>.idx`, a
+header plus the serialized index) in the directory named by
+`AGENT_KIT_MCP_INDEX_CACHE_PATH`. Unset or empty (as the shipped
+`.env.example` leaves it) means `storage_path('framework/cache/agent-kit/index')`;
+`false` disables snapshots; any other value is the directory to use.
+
+On a memory miss the indexer reads the file's header first: when the
+fingerprint and the context (the facade prefixes, the installed
+`nikic/php-parser` version and the Agent Kit revision) match, it returns the
+index without rebuilding; a missing, unreadable, corrupt or stale file falls
+back to a rebuild, which then overwrites the snapshot. Writes go to a
+temporary file that is renamed into place, so a concurrent reader never sees a
+partial snapshot, and the file is readable according to the process umask, so
+a CLI user and a PHP-FPM user of the same group can share it. To clear the
+snapshots, delete the directory; `php artisan cache:clear` does not touch it,
+and the next call recreates it. The CLI commands and the HTTP route both
+benefit from this; the stdio server keeps its long-lived in-memory cache and
+only reads the snapshot on its first call.
 
 ## Logging and diagnostics
 
-Logs go to stderr at `AGENT_KIT_MCP_LOG_LEVEL` (default `info`). Set
+On stdio, logs go to stderr at `AGENT_KIT_MCP_LOG_LEVEL` (default `info`). Set
 `AGENT_KIT_MCP_LOG_CHANNEL` to route them to a channel from `config/logging.php`
 instead; never pick a channel that writes to stdout when using stdio. Set the
 level to `debug` to see tool arguments in the log; production should keep
-`info`.
+`info`. The HTTP route always logs through the application's own log. On the
+application's default channel (no `AGENT_KIT_MCP_LOG_CHANNEL`), records below
+`AGENT_KIT_MCP_LOG_LEVEL` are dropped before they reach it, and the channel's
+own level in `config/logging.php` still applies on top; a channel named in
+`AGENT_KIT_MCP_LOG_CHANNEL` is governed by that channel's level alone.
 
 Troubleshooting:
 
@@ -349,35 +424,48 @@ Troubleshooting:
   `< /dev/null` and read stderr; a start-up error exits `1`.
 - *`401` on HTTP*: the header must be exactly `Authorization: Bearer <token>`;
   tokens in the URL are ignored.
-- *`403` on HTTP*: add the client's origin host to
+- *`403` on HTTP, disallowed `Origin`/`Host`*: add the client's origin host to
   `AGENT_KIT_MCP_ALLOWED_ORIGINS`. A browser client that reaches the server but
   cannot read the response needs the **full** origin (`http://host:port`) there,
   not just the host, so CORS answers with `Access-Control-Allow-Origin`.
-- *`Refusing to bind ... --allow-remote`*: non-loopback binds are opt-in.
-- *`Could not bind the MCP HTTP transport ... Use an IP literal`*: `--host`
-  resolved to a hostname other than `localhost`; pass an IP literal instead.
+- *`403` on HTTP, "only accepts loopback clients"*: the request's client IP is
+  not loopback; set `AGENT_KIT_MCP_ALLOW_REMOTE=true` to accept it, and behind
+  a reverse proxy configure Laravel's `TrustProxies` with the proxy's address
+  (not `'*'`) so `$request->ip()` sees the real client instead of the proxy.
+- *`503` on HTTP, "misconfigured"*: the reason (for example a bearer token
+  under 32 characters) is written to the application log, never to the
+  response; check `storage/logs/laravel.log` or the configured log channel.
+- *`419` (CSRF token mismatch) on HTTP*: the `agent-kit.mcp` route must not run
+  inside the `web` middleware group, and it does not by default; if a
+  customized `bootstrap/app.php` (Laravel 11+) or `RouteServiceProvider`
+  (Laravel 10) applies `web` globally, exclude this route from it.
 - *`The MCP server requires mcp/sdk`*: `composer require --dev mcp/sdk nikic/php-parser`.
 - *`DEPENDENCY_MISSING` from a tool*: `composer require --dev nikic/php-parser`.
-- *`requires react/http`*: `composer require react/http`.
 
 ## Security model
 
 Threats considered: path traversal and symlink escape (fixed root, existing
 containment checks), DNS rebinding and cross-origin browser calls (host
-allowlist, no CORS origin by default), accidental public exposure (loopback bind,
-explicit opt-in, mandatory token), credential timing attacks (`hash_equals`),
-secret leakage (token only from environment, never logged), oversized payloads
-(body and batch caps), abandoned sessions (TTL, GC, bound), exception leakage
-(generic errors on the wire, traces on stderr). The server performs no outbound
-HTTP and no shell execution.
+allowlist, no CORS origin by default), accidental public exposure (loopback-only
+by default, explicit opt-in for remote clients, mandatory token), credential
+timing attacks (`hash_equals`), secret leakage (token only from environment,
+never logged), oversized payloads (body and batch caps), abandoned sessions (TTL),
+exception leakage (generic errors on the wire, details only in the application log). The
+server performs no outbound HTTP and no shell execution. Because the route runs
+inside the host application, enabling it on a deployed environment exposes
+read-only source analysis to anyone who holds the token and can reach that
+application; keep it off, loopback-only and token-protected outside development.
 
 ## Limitations
 
 - Static analysis only; dynamic PHP stays `unresolved`.
 - One project root per process.
 - No standalone `GET` SSE stream, no server-initiated messages, no prompts.
-- HTTP listener is single-threaded and has no TLS.
-- Execution timeouts cannot preempt a running analysis.
+- No TLS of its own; concurrency and connection handling are the web server's
+  (`php artisan serve` serializes calls with its single default worker;
+  PHP-FPM and Octane parallelize them across workers).
+- Over HTTP, a call that runs past `AGENT_KIT_MCP_HTTP_TIME_LIMIT` is aborted
+  with a `500`, never answered with a partial result; stdio has no time limit.
 
 ## Upgrading the SDK
 

@@ -5,15 +5,16 @@ namespace Peralta\AgentKit\Tests\Feature\Mcp;
 use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Psr7\ServerRequest;
 use Mcp\Server;
+use Mcp\Server\Session\InMemorySessionStore;
 use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\BoundedInMemorySessionStore;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpServerOptions;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportFactory;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportOptions;
 use Peralta\AgentKit\Tests\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\NullLogger;
+use Symfony\Component\Uid\Uuid;
 
 final class HttpTransportPipelineTest extends TestCase
 {
@@ -22,12 +23,12 @@ final class HttpTransportPipelineTest extends TestCase
 
     private Server $server;
     private HttpTransportFactory $factory;
-    private BoundedInMemorySessionStore $sessions;
+    private InMemorySessionStore $sessions;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->sessions = new BoundedInMemorySessionStore(3600, 100);
+        $this->sessions = new InMemorySessionStore(3600);
         $this->server = $this->app->make(McpServerFactory::class)->create(
             McpProjectRoot::fromPath(dirname(__DIR__, 2) . '/Fixtures/Refactoring/Ast'),
             new NullLogger(),
@@ -162,7 +163,7 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertSame(400, $this->send('DELETE', $this->auth())->getStatusCode());
         self::assertSame(200, $this->send('DELETE', $this->auth(['Mcp-Session-Id' => $session]))->getStatusCode());
         self::assertSame(404, $this->send('POST', $this->auth(['Mcp-Session-Id' => $session]), $this->request(2, 'tools/list'))->getStatusCode());
-        self::assertSame(0, $this->sessions->count());
+        self::assertFalse($this->sessions->exists(Uuid::fromString($session)));
     }
 
     public function test_invalid_json_is_a_parse_error_and_batches_are_answered_in_one_body(): void
@@ -180,11 +181,6 @@ final class HttpTransportPipelineTest extends TestCase
 
         self::assertSame(413, $response->getStatusCode());
         $this->assertNoSecrets($response);
-    }
-
-    public function test_unrouted_paths_are_404(): void
-    {
-        self::assertSame(404, $this->send('POST', $this->auth(), $this->initialize(), 'http://127.0.0.1:8787/other')->getStatusCode());
     }
 
     public function test_unhandled_transport_failures_are_500_without_stack_traces(): void
@@ -254,12 +250,12 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertStringNotContainsString('#0 ', $body);
     }
 
-    private function httpOptions(array $overrides = []): HttpServerOptions
+    private function httpOptions(array $overrides = []): HttpTransportOptions
     {
-        return HttpServerOptions::fromConfig(array_merge([
-            'enabled' => true, 'host' => '127.0.0.1', 'port' => 8787, 'path' => '/mcp', 'allow_remote' => false,
-            'allowed_origins' => '', 'bearer_token' => self::TOKEN, 'max_body_bytes' => 1048576, 'idle_timeout' => 60,
-            'max_concurrent_requests' => 4, 'session_ttl' => 3600, 'max_sessions' => 100,
+        return HttpTransportOptions::fromConfig(array_merge([
+            'enabled' => true, 'path' => '/mcp', 'allow_remote' => false,
+            'allowed_origins' => '', 'bearer_token' => self::TOKEN, 'max_body_bytes' => 1048576,
+            'session_ttl' => 3600, 'cache_store' => null, 'time_limit' => 120,
         ], $overrides));
     }
 }

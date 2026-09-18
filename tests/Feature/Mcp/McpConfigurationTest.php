@@ -14,17 +14,14 @@ final class McpConfigurationTest extends TestCase
         self::assertSame('stdio', $config['transport']);
         self::assertNull($config['project_root']);
         self::assertFalse($config['http']['enabled']);
-        self::assertSame('127.0.0.1', $config['http']['host']);
-        self::assertSame(8787, $config['http']['port']);
         self::assertSame('/mcp', $config['http']['path']);
         self::assertFalse($config['http']['allow_remote']);
         self::assertSame('', $config['http']['allowed_origins']);
         self::assertNull($config['http']['bearer_token']);
         self::assertSame(1048576, $config['http']['max_body_bytes']);
-        self::assertSame(60, $config['http']['idle_timeout']);
-        self::assertSame(4, $config['http']['max_concurrent_requests']);
         self::assertSame(3600, $config['http']['session_ttl']);
-        self::assertSame(100, $config['http']['max_sessions']);
+        self::assertNull($config['http']['cache_store']);
+        self::assertSame(120, $config['http']['time_limit']);
         self::assertSame(1, $config['index_cache']['max_entries']);
         self::assertSame('info', $config['logging']['level']);
         self::assertNull($config['logging']['channel']);
@@ -33,6 +30,15 @@ final class McpConfigurationTest extends TestCase
     public function test_the_sdk_is_installed(): void
     {
         self::assertTrue(class_exists(\Mcp\Server::class));
-        self::assertTrue(class_exists(\React\Http\HttpServer::class), 'react/http must be a dev dependency so the HTTP listener is tested.');
+    }
+
+    public function test_the_package_default_for_the_index_cache_path_is_null(): void
+    {
+        // TestCase::getEnvironmentSetUp() overrides this to false so tests never share snapshots;
+        // read the shipped config file directly to check the package's own default.
+        $config = require __DIR__ . '/../../../config/agent-kit.php';
+
+        self::assertArrayHasKey('path', $config['mcp']['index_cache']);
+        self::assertNull($config['mcp']['index_cache']['path']);
     }
 }

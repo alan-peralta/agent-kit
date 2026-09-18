@@ -298,35 +298,28 @@ class QdrantStore implements KnowledgeStore
      */
     protected function request(string $method, string $path, array $json = []): array
     {
-        // Guzzle só remove um header herdado quando o valor é um array vazio;
-        // um valor null é convertido em string vazia e o header permanece presente.
+        // 'headers' => null drops every default header of an injected client (Guzzle 7 and 8), so its Authorization or api-key never reaches Qdrant; the request carries its own.
         $headers = [
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
-            'Authorization' => [],
-            'api-key' => [],
         ];
 
         if ($this->apiKey !== null && $this->apiKey !== '') {
             $headers['api-key'] = $this->apiKey;
         }
 
-        $options = [
-            'headers' => $headers,
-            'http_errors' => false,
-            'timeout' => $this->timeout,
-        ];
-
-        if ($json !== []) {
-            $options['json'] = $json;
-        }
-
         $uri = $this->url.'/'.ltrim($path, '/');
 
         for ($attempt = 0; $attempt < 3; $attempt++) {
             try {
-                $response = $this->client->request($method, $uri, $options);
-            } catch (GuzzleException $exception) {
+                $body = $json !== [] ? json_encode($json, JSON_THROW_ON_ERROR) : null;
+                $request = new \GuzzleHttp\Psr7\Request($method, $uri, $headers, $body);
+                $response = $this->client->send($request, [
+                    'headers' => null,
+                    'http_errors' => false,
+                    'timeout' => $this->timeout,
+                ]);
+            } catch (GuzzleException|JsonException $exception) {
                 throw new KnowledgeStoreException(
                     'Qdrant transport request failed: '.$this->sanitize($exception->getMessage()),
                     (int) $exception->getCode(),

@@ -7,6 +7,7 @@ use Peralta\AgentKit\Refactoring\Analysis\Index\CachedCodebaseIndexer;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndex;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexBuilder;
 use Peralta\AgentKit\Refactoring\Analysis\Index\CodebaseIndexer;
+use Peralta\AgentKit\Refactoring\Analysis\Index\IndexSnapshotStore;
 use Peralta\AgentKit\Refactoring\Analysis\Index\ProjectFingerprint;
 use Peralta\AgentKit\Refactoring\Support\PhpFileAnalyzer;
 use Peralta\AgentKit\Refactoring\Support\ProjectScanner;
@@ -20,7 +21,7 @@ final class CachedCodebaseIndexerTest extends TestCase
     protected function tearDown(): void
     {
         foreach (array_reverse($this->directories) as $directory) {
-            foreach (glob($directory . '/*.php') ?: [] as $file) {
+            foreach (glob($directory . '/*') ?: [] as $file) {
                 unlink($file);
             }
             if (is_dir($directory)) {
@@ -143,9 +144,60 @@ final class CachedCodebaseIndexerTest extends TestCase
         $this->cache($this->countingBuilder(), 0);
     }
 
+    public function test_a_second_instance_with_the_same_snapshot_store_reuses_the_index_without_calling_the_inner_builder(): void
+    {
+        $root = $this->project(['Service.php' => '<?php namespace Demo; class Service {}']);
+        $store = new IndexSnapshotStore($this->snapshotDirectory());
+
+        $firstIndex = $this->cacheWithStore($this->countingBuilder(), $store)->build($root);
+
+        $secondInner = $this->countingBuilder();
+        $secondIndex = $this->cacheWithStore($secondInner, $store)->build($root);
+
+        self::assertSame(0, $secondInner->builds);
+        self::assertEquals($firstIndex, $secondIndex);
+    }
+
+    public function test_a_changed_file_rebuilds_and_overwrites_the_snapshot(): void
+    {
+        $root = $this->project(['Service.php' => '<?php namespace Demo; class Service {}']);
+        $store = new IndexSnapshotStore($this->snapshotDirectory());
+        $this->cacheWithStore($this->countingBuilder(), $store)->build($root);
+
+        file_put_contents($root . '/Service.php', '<?php namespace Demo; class Servico {}');
+
+        $rebuildInner = $this->countingBuilder();
+        $rebuilt = $this->cacheWithStore($rebuildInner, $store)->build($root);
+
+        self::assertSame(1, $rebuildInner->builds);
+        self::assertNotNull($rebuilt->findClass('Demo\\Servico'));
+
+        $reloadInner = $this->countingBuilder();
+        $reloaded = $this->cacheWithStore($reloadInner, $store)->build($root);
+
+        self::assertSame(0, $reloadInner->builds);
+        self::assertEquals($rebuilt, $reloaded);
+    }
+
+    public function test_without_a_store_a_second_instance_never_sees_the_first_index(): void
+    {
+        $root = $this->project(['Service.php' => '<?php namespace Demo; class Service {}']);
+        $inner = $this->countingBuilder();
+
+        $this->cache($inner)->build($root);
+        $this->cache($inner)->build($root);
+
+        self::assertSame(2, $inner->builds);
+    }
+
     private function cache(CodebaseIndexBuilder $inner, int $maxEntries = 1): CachedCodebaseIndexer
     {
         return new CachedCodebaseIndexer($inner, new ProjectFingerprint($this->scanner()), $maxEntries);
+    }
+
+    private function cacheWithStore(CodebaseIndexBuilder $inner, IndexSnapshotStore $store, int $maxEntries = 1): CachedCodebaseIndexer
+    {
+        return new CachedCodebaseIndexer($inner, new ProjectFingerprint($this->scanner()), $maxEntries, $store);
     }
 
     private function realIndexer(): CodebaseIndexer
@@ -184,6 +236,14 @@ final class CachedCodebaseIndexerTest extends TestCase
         foreach ($files as $name => $contents) {
             file_put_contents($directory . '/' . $name, $contents);
         }
+
+        return $directory;
+    }
+
+    private function snapshotDirectory(): string
+    {
+        $directory = sys_get_temp_dir() . '/agent-kit-index-cache-snapshot-' . bin2hex(random_bytes(6));
+        $this->directories[] = $directory;
 
         return $directory;
     }

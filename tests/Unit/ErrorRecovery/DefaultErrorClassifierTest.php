@@ -66,11 +66,77 @@ class DefaultErrorClassifierTest extends TestCase
         $this->assertEquals(ErrorType::SERVER_ERROR, $this->classifier->classify($error));
     }
 
+    public function test_request_failure_without_response_is_network_timeout()
+    {
+        $request = new Request('POST', 'https://api.openai.com/v1/chat/completions');
+        $previous = new RequestException('reset', $request);
+        $error = new ProviderException('Erro chamando openai: reset', 0, $previous);
+
+        $this->assertEquals(ErrorType::NETWORK_TIMEOUT, $this->classifier->classify($error));
+    }
+
+    public function test_non_guzzle_network_exception_interface_is_network_timeout()
+    {
+        $request = new Request('POST', 'https://api.openai.com/v1/chat/completions');
+        $previous = new class($request) extends \RuntimeException implements \Psr\Http\Client\NetworkExceptionInterface {
+            public function __construct(private Request $req)
+            {
+                parent::__construct('network error');
+            }
+
+            public function getRequest(): \Psr\Http\Message\RequestInterface
+            {
+                return $this->req;
+            }
+        };
+        $error = new ProviderException('Erro chamando openai: network error', 0, $previous);
+
+        $this->assertEquals(ErrorType::NETWORK_TIMEOUT, $this->classifier->classify($error));
+    }
+
+    public function test_runtime_exception_with_response_429_is_rate_limit()
+    {
+        $request = new Request('POST', 'https://api.openai.com/v1/chat/completions');
+        $response = new Response(429, [], '{"error":"too many requests"}');
+        $previous = new class($response) extends \RuntimeException {
+            public function __construct(private Response $resp)
+            {
+                parent::__construct('rate limited');
+            }
+
+            public function getResponse(): Response
+            {
+                return $this->resp;
+            }
+        };
+        $error = new ProviderException('Erro chamando openai: rate limited', 0, $previous);
+
+        $this->assertEquals(ErrorType::RATE_LIMIT, $this->classifier->classify($error));
+    }
+
+    public function test_runtime_exception_with_throwing_get_response_is_server_error()
+    {
+        $previous = new class extends \RuntimeException {
+            public function getResponse()
+            {
+                throw new \Exception('cannot get response');
+            }
+        };
+        $error = new ProviderException('Erro chamando openai: something', 0, $previous);
+
+        $this->assertEquals(ErrorType::SERVER_ERROR, $this->classifier->classify($error));
+    }
+
+    public function test_it_stays_extendable_as_it_was_in_v0_3_0()
+    {
+        $this->assertFalse((new \ReflectionClass(DefaultErrorClassifier::class))->isFinal());
+    }
+
     private function providerExceptionWithStatus(int $status): ProviderException
     {
         $request = new Request('POST', 'https://api.openai.com/v1/chat/completions');
         $response = new Response($status, [], '{"error":"boom"}');
-        $previous = new RequestException('HTTP error', $request, $response);
+        $previous = RequestException::create($request, $response);
 
         return new ProviderException("Erro chamando openai: HTTP error", 0, $previous);
     }
