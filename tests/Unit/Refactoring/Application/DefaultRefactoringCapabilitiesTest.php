@@ -2,8 +2,10 @@
 
 namespace Peralta\AgentKit\Tests\Unit\Refactoring\Application;
 
+use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpParserRequirement;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParsedFile;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
@@ -804,6 +806,39 @@ PHP));
         ];
     }
 
+    #[DataProvider('astOperations')]
+    public function test_ast_operations_report_a_missing_parser_as_dependency_missing(string $operation): void
+    {
+        try {
+            $this->service($this->missingParser())->{$operation}($this->root, 'Fixtures\\Payments\\PaymentService');
+            $this->fail('Expected a capability exception.');
+        } catch (CapabilityException $exception) {
+            $this->assertSame('DEPENDENCY_MISSING', $exception->errorCode);
+            $this->assertSame(
+                'The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser. Install it with: composer require --dev nikic/php-parser',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    public static function astOperations(): array
+    {
+        return [
+            'analyze' => ['analyze'],
+            'find callers' => ['findCallers'],
+            'dependencies' => ['dependencies'],
+            'impact' => ['impact'],
+        ];
+    }
+
+    public function test_audit_and_discovery_work_without_the_parser(): void
+    {
+        $service = $this->service($this->missingParser());
+
+        $this->assertSame('capability_discovery', $service->describeCapabilities()->capability);
+        $this->assertSame('audit', $service->audit($this->root)->capability);
+    }
+
     public function test_it_rejects_a_missing_project_root_with_a_stable_error(): void
     {
         $this->expectException(CapabilityException::class);
@@ -1018,6 +1053,16 @@ PHP));
                 $this->calls++;
 
                 return $this->inner->parse($file, $displayPath);
+            }
+        };
+    }
+
+    private function missingParser(): AstParser
+    {
+        return new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                throw MissingDependencyException::forFeature(PhpParserRequirement::FEATURE, PhpParserRequirement::PACKAGE);
             }
         };
     }

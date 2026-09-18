@@ -2,8 +2,10 @@
 
 namespace Peralta\AgentKit\Tests\Unit\Refactoring;
 
+use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\AstParser;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpAstParser;
+use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpParserRequirement;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\ParsedFile;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
 use Peralta\AgentKit\Refactoring\Analysis\Graph\DependencyType;
@@ -342,5 +344,29 @@ PHP);
         );
         $this->assertSame([], $index->findReferencesTo('routes/web.php'));
         $this->assertNotEmpty($index->findDependencies('routes/web.php'));
+    }
+
+    public function test_a_missing_dependency_aborts_the_index_instead_of_becoming_a_diagnostic(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-' . bin2hex(random_bytes(6));
+        mkdir($root, 0777, true);
+        file_put_contents($root . '/A.php', '<?php class A {}');
+
+        $parser = new class implements AstParser {
+            public function parse(string $file, ?string $displayPath = null): ParsedFile
+            {
+                throw MissingDependencyException::forFeature(PhpParserRequirement::FEATURE, PhpParserRequirement::PACKAGE);
+            }
+        };
+
+        try {
+            (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), $parser))->build($root);
+            $this->fail('Expected the missing dependency to abort the index.');
+        } catch (MissingDependencyException $exception) {
+            $this->assertSame('nikic/php-parser', $exception->package);
+        } finally {
+            unlink($root . '/A.php');
+            rmdir($root);
+        }
     }
 }

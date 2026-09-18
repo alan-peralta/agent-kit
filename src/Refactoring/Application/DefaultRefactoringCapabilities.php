@@ -3,6 +3,7 @@
 namespace Peralta\AgentKit\Refactoring\Application;
 
 use InvalidArgumentException;
+use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Analysis\CallerAnalyzer;
 use Peralta\AgentKit\Refactoring\Analysis\DTOs\SymbolDefinition;
 use Peralta\AgentKit\Refactoring\Analysis\ImpactAnalyzer;
@@ -80,7 +81,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
     {
         $root = $this->projectRoot($projectRoot);
         $requested = $this->target($target);
-        $index = $this->indexer->build($root);
+        $index = $this->index($root);
         [$file, $displayPath, $symbols, $isFileTarget] = $this->analysisTarget($root, $requested, $index);
 
         if ($isFileTarget && $requested->method !== null && $symbols === []) {
@@ -160,7 +161,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
     {
         $root = $this->projectRoot($projectRoot);
         $requested = $this->target($target);
-        $index = $this->indexer->build($root);
+        $index = $this->index($root);
         $symbol = $this->requireClass($index, $requested->value);
         $method = $this->canonicalMethod($index, $symbol->fqcn, $requested->method);
         $result = $this->callers->findCallers($index, $symbol->fqcn, $method);
@@ -187,7 +188,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             );
         }
 
-        $index = $this->indexer->build($root);
+        $index = $this->index($root);
         $symbol = $this->requireClass($index, $requested->value);
 
         return new CapabilityResult('dependencies', [
@@ -202,7 +203,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
     {
         $root = $this->projectRoot($projectRoot);
         $requested = $this->target($target);
-        $index = $this->indexer->build($root);
+        $index = $this->index($root);
         $symbol = $this->requireClass($index, $requested->value);
         $method = $this->canonicalMethod($index, $symbol->fqcn, $requested->method);
         $result = $this->impactAnalyzer->analyze($index, $symbol->fqcn, $method);
@@ -219,6 +220,15 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
             $functionDiagnostic === null ? $result->diagnostics : [...$result->diagnostics, $functionDiagnostic],
             $index->unresolvedReferences(),
         );
+    }
+
+    private function index(string $root): CodebaseIndex
+    {
+        try {
+            return $this->indexer->build($root);
+        } catch (MissingDependencyException $exception) {
+            throw new CapabilityException('DEPENDENCY_MISSING', $exception->getMessage());
+        }
     }
 
     private function projectRoot(string $projectRoot): string
