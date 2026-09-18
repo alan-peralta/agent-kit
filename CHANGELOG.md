@@ -7,8 +7,13 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não Lançado]
 
+## [0.3.0] - 2026-09-18
+
 ### Adicionado
-- Opções por chamada `response_format` (incluída no payload de `POST chat/completions`) e `timeout` (opção Guzzle da requisição, em segundos, que sobrescreve `providers.*.timeout` só naquela chamada) em `OpenAIProvider`, herdadas por `DeepSeekProvider` e configuráveis via `Agent::options()`. Sem as opções, payload e opções HTTP permanecem idênticos aos da v0.2.0.
+- Opções por chamada `response_format` e `timeout` em `OpenAIProvider`, herdadas sem override por `DeepSeekProvider` e configuráveis via `Agent::options()`. `response_format` é repassada como recebida no payload de `POST chat/completions` (use `['type' => 'json_object']` para obter JSON parseável do provider em vez de depender do prompt); `timeout` é opção Guzzle da requisição, em segundos (`int|float`), que sobrescreve `agent-kit.providers.*.timeout` (default 60 s) apenas naquela chamada e nunca entra no corpo JSON. Ambas são opcionais e retrocompatíveis: quando não informadas, o payload e as opções HTTP da requisição permanecem byte a byte idênticos aos da v0.2.0, o que é coberto por testes-guarda. `AnthropicProvider` e `GeminiProvider` não consomem nenhuma das duas.
+
+### Documentação
+- `README.md` ganha a seção "Opções por chamada", descrevendo `response_format` e `timeout` nos providers compatíveis com a API da OpenAI (`openai` e `deepseek`), com exemplo de uso e o comportamento padrão na ausência de cada opção.
 
 ## [0.2.0] - 2026-09-18
 
@@ -70,6 +75,7 @@ _Atualizando da v0.1.0: veja a seção "Atualizando" do [README](README.md#atual
 - Especificações de design e planos de implementação para o sistema de recuperação de erros, analytics/monitoramento e melhorias na suíte de testes unitários.
 - Documentação da configuração e comportamento de recuperação de erros, e da configuração/eventos de analytics.
 
-[Não Lançado]: https://github.com/alan-peralta/agent-kit/compare/v0.2.0...HEAD
+[Não Lançado]: https://github.com/alan-peralta/agent-kit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/alan-peralta/agent-kit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alan-peralta/agent-kit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/alan-peralta/agent-kit/releases/tag/v0.1.0
