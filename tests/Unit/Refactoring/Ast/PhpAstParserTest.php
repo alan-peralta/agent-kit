@@ -350,6 +350,85 @@ PHP);
         $this->assertTrue($this->hasFrom($parsed->references, 'app/Support/Clock.php', DependencyType::INSTANTIATION, 'App\\Support\\Clock'));
     }
 
+    public function test_top_level_functions_are_registered_on_the_script_symbol(): void
+    {
+        $parsed = $this->parseCode('app/helpers.php', <<<'PHP'
+<?php
+use App\Models\User;
+use App\Services\UserMaker;
+if (!function_exists('make_user')) {
+    function make_user(UserMaker $maker, string $name = 'x'): User
+    {
+        $user = $maker->make($name);
+        $user->save();
+        return $user;
+    }
+}
+function plain(): void { new UserMaker(); }
+PHP);
+
+        $this->assertSame([], $parsed->diagnostics);
+        $this->assertCount(1, $parsed->symbols);
+        $script = $parsed->symbols[0];
+        $this->assertSame('app/helpers.php', $script->fqcn);
+        $this->assertSame('script', $script->kind);
+        $this->assertSame(['make_user', 'plain'], array_column($script->methods, 'name'));
+        $this->assertSame([5, 12], array_column($script->methods, 'line'));
+        $this->assertSame(['App\\Models\\User'], $script->methods[0]['return_types']);
+        $this->assertSame(['maker', 'name'], array_column($script->methods[0]['parameters'], 'name'));
+        $this->assertSame(['App\\Services\\UserMaker'], $script->methods[0]['parameters'][0]['types']);
+        $this->assertSame([], $script->methods[0]['parameters'][1]['types']);
+
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'make_user', DependencyType::METHOD_PARAMETER, 'App\\Services\\UserMaker'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'make_user', DependencyType::RETURN_TYPE, 'App\\Models\\User'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'make_user', DependencyType::METHOD_CALL, 'App\\Services\\UserMaker'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'app/helpers.php', 'plain', DependencyType::INSTANTIATION, 'App\\Services\\UserMaker'));
+        $this->assertFalse($this->hasFromMethod($parsed->references, 'app/helpers.php', null, DependencyType::INSTANTIATION, 'App\\Services\\UserMaker'));
+    }
+
+    public function test_script_locals_survive_a_top_level_function_declaration(): void
+    {
+        $parsed = $this->parseCode('bootstrap/app.php', <<<'PHP'
+<?php
+use Illuminate\Foundation\Application;
+$app = new Application(dirname(__DIR__));
+function configure(Application $app): void { $app->useStoragePath('x'); }
+$app->useEnvironmentPath('y');
+PHP);
+
+        $calls = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::METHOD_CALL));
+        $this->assertSame(
+            [['configure', 'useStoragePath', 'Illuminate\\Foundation\\Application'], [null, 'useEnvironmentPath', 'Illuminate\\Foundation\\Application']],
+            array_map(fn ($reference) => [$reference->sourceMethod, $reference->targetMethod, $reference->target], $calls),
+        );
+    }
+
+    public function test_nested_named_functions_get_their_own_scope_without_leaking_types(): void
+    {
+        $parsed = $this->parseCode('Nested.php', <<<'PHP'
+<?php
+namespace Demo;
+class Host {
+    public function boot(Service $service): void {
+        function helper(Other $service): void { $service->other(); $inner = new Extra(); $inner->extra(); }
+        $service->run();
+        $inner->missing();
+    }
+}
+PHP);
+
+        $this->assertSame(['Demo\\Host'], array_map(fn ($symbol) => $symbol->fqcn, $parsed->symbols));
+        $this->assertSame(['boot'], array_column($parsed->symbols[0]->methods, 'name'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'Demo\\Host', 'boot', DependencyType::METHOD_CALL, 'Demo\\Other'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'Demo\\Host', 'boot', DependencyType::METHOD_CALL, 'Demo\\Extra'));
+        $this->assertTrue($this->hasFromMethod($parsed->references, 'Demo\\Host', 'boot', DependencyType::METHOD_CALL, 'Demo\\Service'));
+        // Nested function parameters are locals of that function, not structural dependencies of boot().
+        $this->assertFalse($this->has($parsed->references, DependencyType::METHOD_PARAMETER, 'Demo\\Other'));
+        $missing = array_values(array_filter($parsed->references, fn ($reference) => $reference->type === DependencyType::METHOD_CALL && $reference->target === null));
+        $this->assertCount(1, $missing);
+        $this->assertSame(7, $missing[0]->line);
+    }
+
     private function has(array $references, DependencyType $type, string $target): bool
     {
         foreach ($references as $reference) {

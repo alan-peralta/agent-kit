@@ -602,16 +602,40 @@ PHP);
                 'direct_callers' => [],
                 'structural_dependencies' => [],
                 'transitive_impact' => [],
-                'risk' => 'UNKNOWN',
+                'risk' => 'LOW',
             ], $result->data);
 
+            $function = $this->service()->analyze($root, 'Standalone.php::helper');
+            $this->assertSame('Standalone.php', $function->data['target']);
+            $this->assertSame('helper', $function->data['method']);
+            $this->assertSame([], $function->data['upstream_dependencies']);
+            $this->assertSame('LOW', $function->data['risk']);
+        } finally {
+            if (is_file($file)) {
+                unlink($file);
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+        }
+    }
+
+    public function test_a_method_target_on_a_file_without_routines_is_unsupported(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-no-routines-' . bin2hex(random_bytes(6));
+        $file = $root . '/Config.php';
+
+        try {
+            $this->assertTrue(mkdir($root, 0777, true));
+            $this->assertNotFalse(file_put_contents($file, "<?php\n\nreturn ['debug' => false];\n"));
+
             try {
-                $this->service()->analyze($root, 'Standalone.php::helper');
+                $this->service()->analyze($root, 'Config.php::helper');
                 $this->fail('Expected an unsupported target error.');
             } catch (CapabilityException $exception) {
                 $this->assertSame('UNSUPPORTED_TARGET', $exception->errorCode);
                 $this->assertSame(
-                    'A method target requires a class declaration.',
+                    'A method target requires a class or top-level function declaration.',
                     $exception->getMessage(),
                 );
             }

@@ -80,7 +80,7 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         if ($isFileTarget && $requested->method !== null && $symbols === []) {
             throw new CapabilityException(
                 'UNSUPPORTED_TARGET',
-                'A method target requires a class declaration.',
+                'A method target requires a class or top-level function declaration.',
             );
         }
         if ($isFileTarget && $requested->method !== null && count($symbols) > 1) {
