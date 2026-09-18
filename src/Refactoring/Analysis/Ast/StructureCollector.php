@@ -26,18 +26,32 @@ final class StructureCollector extends NodeVisitorAbstract
     private array $conditionalScopes = [];
     private array $taintedLocals = [];
     private bool $allLocalsTainted = false;
+    /** Attribution source: the file path at script scope, the FQCN inside a named class. */
+    private string $source;
+    /** True while no named class encloses the visitor (top level and anonymous-class bodies there). */
+    private bool $scriptScope = true;
+    /** Script symbol created on the first script-scope reference or top-level function. */
+    private ?array $script = null;
     private readonly NameContext $nameContext;
 
     public function __construct(
         private readonly string $file,
         private readonly array $facadePrefixes = [],
     ) {
+        $this->source = $file;
         $this->nameContext = new NameContext();
     }
 
     public function symbols(): array
     {
-        return $this->symbols;
+        if ($this->script === null) {
+            return $this->symbols;
+        }
+
+        return [
+            ...$this->symbols,
+            new SymbolDefinition($this->file, 'script', $this->file, 1, $this->script['methods']),
+        ];
     }
 
     public function references(): array
@@ -86,11 +100,9 @@ final class StructureCollector extends NodeVisitorAbstract
             return null;
         }
 
-        if ($this->currentClass === null) {
-            return null;
-        }
-
-        if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
+        if ($node instanceof Node\Stmt\Function_) {
+            $this->enterFunction($node);
+        } elseif ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
             $this->enterLocalFunction($node);
         } elseif ($this->isUncertainControlFlow($node)) {
             $this->enterUncertainScope($node);
@@ -171,17 +183,10 @@ final class StructureCollector extends NodeVisitorAbstract
                 );
             }
 
-            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted]
+            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted, $this->source, $this->scriptScope]
                 = array_pop($this->classStack);
             $this->nameContext->set($this->currentClass, $this->currentParent);
 
-            return null;
-        }
-
-        // enterNode() skips every node outside a named class (procedural files, top-level
-        // functions, anonymous class bodies), so nothing was pushed for them and popping
-        // here would underflow the scope stacks. Mirror that guard exactly.
-        if ($this->currentClass === null) {
             return null;
         }
 
@@ -193,14 +198,18 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->taintCallArguments($node);
         }
 
-        if ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction) {
-            [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted, $byReference]
+        if ($node instanceof Node\Stmt\Function_
+            || $node instanceof Node\Expr\Closure
+            || $node instanceof Node\Expr\ArrowFunction) {
+            [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted, $byReference, $this->currentMethod]
                 = array_pop($this->localScopeStack);
             $this->taintVariables($byReference);
         }
 
         if ($node instanceof Node\Stmt\ClassMethod) {
-            $this->currentMethod = null;
+            if ($this->symbol !== null) {
+                $this->currentMethod = null;
+            }
             $this->localTypes = [];
             $this->localScopeStack = [];
             $this->conditionalScopes = [];
@@ -224,13 +233,21 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->conditionalScopes,
             $this->taintedLocals,
             $this->allLocalsTainted,
+            $this->source,
+            $this->scriptScope,
         ];
 
         $namespacedName = $node->namespacedName;
         $this->currentClass = $namespacedName instanceof Node\Name
             ? ltrim($namespacedName->toString(), '\\')
             : null;
-        $this->currentMethod = null;
+        // An anonymous class keeps the declaring routine as its source: its body is
+        // attributed to that routine and no symbol is emitted for it.
+        if ($this->currentClass !== null) {
+            $this->source = $this->currentClass;
+            $this->scriptScope = false;
+            $this->currentMethod = null;
+        }
         $this->propertyTypes = [];
         $this->localTypes = [];
         $this->localScopeStack = [];
@@ -242,13 +259,7 @@ final class StructureCollector extends NodeVisitorAbstract
         $this->currentParent = $parent instanceof Node\Name ? $this->resolvedName($parent) : null;
         $this->nameContext->set($this->currentClass, $this->currentParent);
 
-        if ($this->currentClass === null) {
-            $this->symbol = null;
-
-            return;
-        }
-
-        $this->symbol = [
+        $this->symbol = $this->currentClass === null ? null : [
             'kind' => match (true) {
                 $node instanceof Node\Stmt\Interface_ => 'interface',
                 $node instanceof Node\Stmt\Trait_ => 'trait',
@@ -312,7 +323,10 @@ final class StructureCollector extends NodeVisitorAbstract
 
     private function enterMethod(Node\Stmt\ClassMethod $node): void
     {
-        $this->currentMethod = $node->name->toString();
+        $name = $node->name->toString();
+        if ($this->symbol !== null) {
+            $this->currentMethod = $name;
+        }
         $this->localTypes = [];
         $this->localScopeStack = [];
         $this->conditionalScopes = [];
@@ -330,7 +344,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 'line' => $param->getStartLine(),
             ];
             foreach ($types as $type) {
-                $dependencyType = $this->currentMethod === '__construct'
+                $dependencyType = $name === '__construct'
                     ? DependencyType::CONSTRUCTOR_INJECTION
                     : DependencyType::METHOD_PARAMETER;
                 $this->addReference($type, null, $dependencyType, Confidence::EXACT, $param);
@@ -341,11 +355,13 @@ final class StructureCollector extends NodeVisitorAbstract
             }
 
             if ($param->flags !== 0 && $param->var instanceof Node\Expr\Variable && is_string($param->var->name)) {
-                $this->symbol['properties'][] = [
-                    'name' => $param->var->name,
-                    'types' => $types,
-                    'line' => $param->getStartLine(),
-                ];
+                if ($this->symbol !== null) {
+                    $this->symbol['properties'][] = [
+                        'name' => $param->var->name,
+                        'types' => $types,
+                        'line' => $param->getStartLine(),
+                    ];
+                }
                 if (count($types) === 1) {
                     $this->propertyTypes[$param->var->name] = $types[0];
                 }
@@ -362,12 +378,14 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->addReference($type, null, DependencyType::RETURN_TYPE, Confidence::EXACT, $node);
         }
 
-        $this->symbol['methods'][] = [
-            'name' => $this->currentMethod,
-            'parameters' => $parameters,
-            'return_types' => $returnTypes,
-            'line' => $node->getStartLine(),
-        ];
+        if ($this->symbol !== null) {
+            $this->symbol['methods'][] = [
+                'name' => $name,
+                'parameters' => $parameters,
+                'return_types' => $returnTypes,
+                'line' => $node->getStartLine(),
+            ];
+        }
 
         $this->collectAttributes($node);
     }
@@ -377,11 +395,13 @@ final class StructureCollector extends NodeVisitorAbstract
         $types = $this->classTypes($node->type);
         foreach ($node->props as $property) {
             $name = $property->name->toString();
-            $this->symbol['properties'][] = [
-                'name' => $name,
-                'types' => $types,
-                'line' => $property->getStartLine(),
-            ];
+            if ($this->symbol !== null) {
+                $this->symbol['properties'][] = [
+                    'name' => $name,
+                    'types' => $types,
+                    'line' => $property->getStartLine(),
+                ];
+            }
             if (count($types) === 1) {
                 $this->propertyTypes[$name] = $types[0];
             }
@@ -395,10 +415,12 @@ final class StructureCollector extends NodeVisitorAbstract
     private function collectConstants(Node\Stmt\ClassConst $node): void
     {
         foreach ($node->consts as $constant) {
-            $this->symbol['constants'][] = [
-                'name' => $constant->name->toString(),
-                'line' => $constant->getStartLine(),
-            ];
+            if ($this->symbol !== null) {
+                $this->symbol['constants'][] = [
+                    'name' => $constant->name->toString(),
+                    'line' => $constant->getStartLine(),
+                ];
+            }
         }
         $this->collectAttributes($node);
     }
@@ -446,7 +468,7 @@ final class StructureCollector extends NodeVisitorAbstract
                 }
             }
         }
-        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $outerTainted, $outerAllTainted, $byReference];
+        $this->localScopeStack[] = [$outerTypes, $this->conditionalScopes, $outerTainted, $outerAllTainted, $byReference, $this->currentMethod];
         $this->conditionalScopes = [];
         $this->localTypes = $node instanceof Node\Expr\ArrowFunction ? $outerTypes : [];
         $this->taintedLocals = $node instanceof Node\Expr\ArrowFunction ? $outerTainted : [];
@@ -479,6 +501,64 @@ final class StructureCollector extends NodeVisitorAbstract
                 $this->localTypes[$param->var->name] = $types[0];
             }
         }
+    }
+
+    private function enterFunction(Node\Stmt\Function_ $node): void
+    {
+        // Top level means: not inside any class (named or anonymous), routine or closure.
+        // Only those functions become routines of the script symbol; a function declared
+        // inside a method or closure just gets a fresh local scope, like a closure without
+        // captured variables, and its body stays attributed to the declaring routine.
+        $topLevel = $this->classStack === []
+            && $this->currentMethod === null
+            && $this->localScopeStack === [];
+
+        $this->localScopeStack[] = [$this->localTypes, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted, [], $this->currentMethod];
+        $this->conditionalScopes = [];
+        $this->localTypes = [];
+        $this->taintedLocals = [];
+        $this->allLocalsTainted = false;
+        if ($topLevel) {
+            $this->currentMethod = $node->name->toString();
+        }
+
+        $parameters = [];
+        foreach ($node->params as $param) {
+            $types = $this->classTypes($param->type);
+            $name = $param->var instanceof Node\Expr\Variable && is_string($param->var->name)
+                ? $param->var->name
+                : null;
+            $parameters[] = [
+                'name' => $name,
+                'types' => $types,
+                'line' => $param->getStartLine(),
+            ];
+            if ($name !== null && count($types) === 1) {
+                $this->localTypes[$name] = $types[0];
+            }
+            if ($topLevel) {
+                foreach ($types as $type) {
+                    $this->addReference($type, null, DependencyType::METHOD_PARAMETER, Confidence::EXACT, $param);
+                }
+            }
+        }
+
+        if (!$topLevel) {
+            return;
+        }
+
+        $returnTypes = $this->classTypes($node->returnType);
+        foreach ($returnTypes as $type) {
+            $this->addReference($type, null, DependencyType::RETURN_TYPE, Confidence::EXACT, $node);
+        }
+        $this->script ??= ['methods' => []];
+        $this->script['methods'][] = [
+            'name' => $this->currentMethod,
+            'parameters' => $parameters,
+            'return_types' => $returnTypes,
+            'line' => $node->getStartLine(),
+        ];
+        $this->collectAttributes($node);
     }
 
     private function enterUncertainScope(Node $node): void
@@ -717,6 +797,7 @@ final class StructureCollector extends NodeVisitorAbstract
         $visit = function (Node $node, bool $isRoot = false) use (&$visit, $recordTarget): void {
             if (!$isRoot && ($node instanceof Node\Expr\Closure
                 || $node instanceof Node\Expr\ArrowFunction
+                || $node instanceof Node\Stmt\Function_
                 || $node instanceof Node\Stmt\ClassLike)) {
                 return;
             }
@@ -848,10 +929,6 @@ final class StructureCollector extends NodeVisitorAbstract
         }
 
         $constant = $node->name instanceof Node\Identifier ? $node->name->toString() : null;
-        if ($node->class instanceof Node\Name && $constant !== null && strcasecmp($constant, 'class') === 0) {
-            return;
-        }
-
         $target = $node->class instanceof Node\Name ? $this->resolvedName($node->class) : null;
         $this->addReference(
             $target,
@@ -996,7 +1073,9 @@ final class StructureCollector extends NodeVisitorAbstract
             foreach ($group->attrs as $attribute) {
                 $target = $this->resolvedName($attribute->name);
                 if ($target !== null) {
-                    $this->symbol['attributes'][] = $target;
+                    if ($this->symbol !== null) {
+                        $this->symbol['attributes'][] = $target;
+                    }
                     $this->addReference($target, null, DependencyType::ATTRIBUTE, Confidence::EXACT, $attribute);
                 }
             }
@@ -1052,11 +1131,11 @@ final class StructureCollector extends NodeVisitorAbstract
         Node $node,
         array $metadata = [],
     ): void {
-        if ($this->currentClass === null) {
-            return;
+        if ($this->scriptScope) {
+            $this->script ??= ['methods' => []];
         }
         $this->references[] = new Reference(
-            $this->currentClass,
+            $this->source,
             $this->currentMethod,
             $target,
             $targetMethod,

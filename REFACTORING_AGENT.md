@@ -125,15 +125,58 @@ ProjectScanner
 ```
 
 The index extracts namespaces, imports and aliases, classes, interfaces,
-traits, enums, methods, properties, constants, attributes, inheritance,
-implemented interfaces, used traits, declared types, instantiations, static
-calls, class constants, and object calls whose receiver type can be inferred
-safely. Every relationship retains its source class, source method, file, and
-line.
+traits, enums, scripts (files with code outside a named class), methods,
+top-level functions, properties, constants, attributes, inheritance,
+implemented interfaces, used traits, declared types, `ClassName::class`
+expressions, instantiations, static calls, class constants, and object calls
+whose receiver type can be inferred safely. Every relationship retains its
+source (class or script), source method, file, and line.
 
 Names are normalized to FQCNs. Imports, aliases, fully qualified names,
 `self`, `static`, and `parent` are resolved before indexing. Union,
 intersection, and nullable types are decomposed into their class-like members.
+
+### Procedural code and scripts
+
+Code outside a named class — `routes/*.php`, `config/*.php`,
+`bootstrap/app.php`, helper files and anonymous-class migrations — is indexed
+too. A file with at least one reference at script scope or at least one
+top-level function yields a `script` symbol identified by its root-relative
+path (for example `routes/web.php`, with `kind: "script"` and `line: 1`).
+The symbol is created only when needed, so files that only declare classes
+keep exactly the symbols they declare.
+
+References are attributed to the routine that declares the code:
+
+| Code | `source` | `source_method` |
+|---|---|---|
+| statement at script scope, including closures and control flow there | script path | `null` |
+| body of a top-level function (also inside `if (!function_exists(...))`) | script path | function name |
+| named function nested in a method, function or closure | the declaring routine | unchanged |
+| anonymous class body | the declaring routine | unchanged |
+
+Top-level functions are listed in the script's `methods` with the same shape
+as class methods, so `helpers.php::make_user` is a valid `refactor-analyze`
+target.
+
+Because calls to user-defined functions are not tracked, function targets
+always report `risk: UNKNOWN` together with a diagnostic (`Calls to
+user-defined functions are not indexed; …`), so `incomplete` is `true` for
+them. Attributes on top-level functions produce `attribute` edges.
+
+Scripts appear as dependents in `refactor-callers`,
+`refactor-impact` and `refactor-analyze` results, and a root-relative script
+path is accepted wherever a class name is accepted (`refactor-dependencies
+routes/web.php` lists what a routes file depends on). `ClassName::class`
+expressions are recorded as `class_constant` edges with
+`metadata.constant = "class"`, which is how routes, config arrays, listeners
+and Eloquent relations name their classes.
+
+Inside an anonymous class `$this`, `self` and `static` have no name, so calls
+through them stay `unknown`; `parent::` resolves to the declared parent, and
+the anonymous class's typed properties still drive receiver inference. Calls
+to user-defined functions are not tracked: scripts and functions only appear
+as sources, never as call targets.
 
 ### Dependency types
 
@@ -247,17 +290,20 @@ indexing. Defaults exclude `vendor`, `storage`, `bootstrap/cache`,
 file is parsed once per index build. Declaration and reverse-reference maps
 avoid rescanning for each query.
 
-A syntax error in one PHP file produces a diagnostic and indexing continues.
-Text output warns that results may be incomplete; JSON includes file, line, and
-message in `diagnostics`. An invalid project root or missing target class fails
-the command clearly.
+A syntax error, an unreadable file or an internal analysis failure in one PHP
+file produces a diagnostic (`Analysis failed: …` for the latter two) and
+indexing continues. Text output warns that results may be incomplete; JSON
+includes file, line, and message in `diagnostics`. An invalid project root or
+missing target class fails the command clearly.
 
 ## Static-analysis limits
 
 The first version does not execute code, resolve runtime container bindings,
 follow arbitrary assignments across branches, propagate types across method
 boundaries, interpret dynamic class strings, or infer calls from untyped
-receivers. It intentionally reports unknown rather than inventing a target.
+receivers. It intentionally reports unknown rather than inventing a target. It
+also does not track calls to user-defined functions and names nothing for
+`$this`, `self` or `static` inside anonymous classes.
 
 ## Agent workflow
 
