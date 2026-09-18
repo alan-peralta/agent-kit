@@ -21,7 +21,7 @@ as demais, sem tag própria.
 
 ```bash
 composer config repositories.agent-kit vcs https://github.com/alan-peralta/agent-kit
-composer require peralta/agent-kit:^0.2
+composer require peralta/agent-kit:^0.3
 php artisan vendor:publish --tag=agent-kit-config
 php artisan vendor:publish --tag=agent-kit-migrations
 php artisan migrate
@@ -35,6 +35,11 @@ composer require peralta/agent-kit:@dev
 ```
 
 ## Atualizando
+
+Vindo da v0.2.0: a v0.3.0 é retrocompatível — só adiciona as opções por chamada
+`response_format` e `timeout`. Como `^0.2` não alcança a 0.3.0, ajuste a restrição
+(`composer require peralta/agent-kit:^0.3`). Nenhuma config nova para republicar e
+nenhuma migration nova.
 
 Vindo da v0.1.0: `composer update peralta/agent-kit`, depois
 `php artisan vendor:publish --tag=agent-kit-config --force` para trazer as novas
