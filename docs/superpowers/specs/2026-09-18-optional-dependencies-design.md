@@ -99,14 +99,16 @@ of production images built with `--no-dev`.
 ### AST capabilities
 
 `Peralta\AgentKit\Refactoring\Analysis\Ast\PhpParserRequirement` has one
-static method, `assertSatisfied(string $factory = ParserFactory::class): void`.
-The `$factory` parameter exists so tests can point it at a missing class or at
-a class without the 5.x API.
+static method,
+`assertSatisfied(string $factory = ParserFactory::class, string $version = PhpVersion::class): void`.
+Both class names are parameters only so tests can stand in for a missing
+package and for an older major.
 
 - Class `$factory` does not exist → `MissingDependencyException::forFeature('The AST analysis (analyze, callers, dependencies, impact)', 'nikic/php-parser')`.
-- The class exists but has no `createForNewestSupportedVersion()` method
-  (php-parser 4.x) → `MissingDependencyException` for `nikic/php-parser` with
-  the message `The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser 5.x, but an older major version is installed. Upgrade it with: composer require --dev "nikic/php-parser:^5.0"`.
+- The factory exists but `PhpParser\PhpVersion` does not (php-parser 4.x;
+  4.18 and later already ship the 5.x factory methods, so a method check
+  would not tell the majors apart) → `MissingDependencyException` for
+  `nikic/php-parser` with the message `The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser 5.x, but an older major version is installed. Upgrade it with: composer require --dev "nikic/php-parser:^5.0"`.
 
 `PhpAstParser`:
 
@@ -148,10 +150,11 @@ message in `ReactHttpListener` is unchanged.
 ## Testing
 
 - **Unit:** `MissingDependencyException::forFeature()` message and package;
-  `PhpParserRequirement` for a missing class, for a class without
-  `createForNewestSupportedVersion()` (for example `stdClass`) and for the real
-  `ParserFactory`; `PhpAstParser` construction does not create a parser (a
-  constructed instance parses normally on first use); `CodebaseIndexer`
+  `PhpParserRequirement` for a missing class, for the real `ParserFactory`
+  with a missing `PhpVersion` marker class (php-parser 4.x), and for the
+  real `ParserFactory` with the real `PhpVersion`; `PhpAstParser`
+  construction does not create a parser (a constructed instance parses
+  normally on first use); `CodebaseIndexer`
   rethrows `MissingDependencyException` from a fake `AstParser` instead of
   recording diagnostics; `DefaultRefactoringCapabilities` maps it to
   `DEPENDENCY_MISSING` for `analyze`, `findCallers`, `dependencies` and

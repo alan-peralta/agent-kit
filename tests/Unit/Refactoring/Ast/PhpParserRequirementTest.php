@@ -5,6 +5,7 @@ namespace Peralta\AgentKit\Tests\Unit\Refactoring\Ast;
 use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Analysis\Ast\PhpParserRequirement;
 use PhpParser\ParserFactory;
+use PhpParser\PhpVersion;
 use PHPUnit\Framework\TestCase;
 
 final class PhpParserRequirementTest extends TestCase
@@ -12,7 +13,7 @@ final class PhpParserRequirementTest extends TestCase
     public function test_the_installed_php_parser_5_satisfies_it(): void
     {
         PhpParserRequirement::assertSatisfied();
-        PhpParserRequirement::assertSatisfied(ParserFactory::class);
+        PhpParserRequirement::assertSatisfied(ParserFactory::class, PhpVersion::class);
 
         $this->addToAssertionCount(1);
     }
@@ -33,9 +34,9 @@ final class PhpParserRequirementTest extends TestCase
 
     public function test_an_older_major_version_asks_for_an_upgrade(): void
     {
-        // php-parser 4.x has a ParserFactory, but not the 5.x factory method the parser uses.
+        // php-parser 4.18+ already has the 5.x factory methods, but no PhpVersion class.
         try {
-            PhpParserRequirement::assertSatisfied(\stdClass::class);
+            PhpParserRequirement::assertSatisfied(ParserFactory::class, 'Peralta\\AgentKit\\Tests\\Missing\\PhpVersion');
             $this->fail('Expected a missing dependency.');
         } catch (MissingDependencyException $exception) {
             $this->assertSame('nikic/php-parser', $exception->package);
