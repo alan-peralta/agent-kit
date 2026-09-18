@@ -7,6 +7,9 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não Lançado]
 
+### Adicionado
+- Opções por chamada `response_format` (incluída no payload de `POST chat/completions`) e `timeout` (opção Guzzle da requisição, em segundos, que sobrescreve `providers.*.timeout` só naquela chamada) em `OpenAIProvider`, herdadas por `DeepSeekProvider` e configuráveis via `Agent::options()`. Sem as opções, payload e opções HTTP permanecem idênticos aos da v0.2.0.
+
 ## [0.2.0] - 2026-09-18
 
 _Atualizando da v0.1.0: veja a seção "Atualizando" do [README](README.md#atualizando)._

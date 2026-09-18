@@ -29,18 +29,29 @@ class OpenAIProvider extends AbstractProvider
             $payload['temperature'] = $options['temperature'];
         }
 
+        if (isset($options['response_format'])) {
+            $payload['response_format'] = $options['response_format'];
+        }
+
         if (!empty($tools)) {
             $payload['tools'] = $this->formatTools($tools);
             $payload['tool_choice'] = $options['tool_choice'] ?? 'auto';
         }
 
-        $data = $this->request('POST', 'chat/completions', [
+        $requestOptions = [
             'headers' => [
                 'Authorization' => 'Bearer ' . $this->config['api_key'],
                 'Content-Type' => 'application/json',
             ],
             'json' => $payload,
-        ]);
+        ];
+
+        // Opção do Guzzle, não do payload: sobrescreve o timeout de client só nesta requisição.
+        if (isset($options['timeout'])) {
+            $requestOptions['timeout'] = $options['timeout'];
+        }
+
+        $data = $this->request('POST', 'chat/completions', $requestOptions);
 
         return $this->parseResponse($data);
     }

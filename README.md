@@ -75,6 +75,31 @@ $response = Agent::make()
 echo $response->text();
 ```
 
+### Opções por chamada
+
+`options()` repassa chaves ao provider da chamada. Nos providers compatíveis com a API
+da OpenAI (`openai` e `deepseek`), duas delas ajustam a requisição:
+
+```php
+$response = Agent::make()
+    ->provider('deepseek')
+    ->system('Responda apenas com JSON.')
+    ->options([
+        'response_format' => ['type' => 'json_object'],
+        'timeout' => 8,
+    ])
+    ->send('Liste 3 frutas no formato {"frutas": [...]}.');
+```
+
+- `response_format` — array repassado como recebido no corpo de `POST chat/completions`.
+  Use `['type' => 'json_object']` para que o provider garanta um JSON parseável em vez de
+  depender do prompt. Sem a opção, a chave não é enviada.
+- `timeout` — timeout da requisição HTTP em segundos (`int|float`). Sobrescreve
+  `agent-kit.providers.*.timeout` (default 60 s) apenas naquela chamada e nunca entra no
+  payload JSON. Sem a opção, vale o timeout de client.
+
+Ambas valem por chamada; `AnthropicProvider` e `GeminiProvider` não as consomem.
+
 ## Criando uma tool
 
 ```php
