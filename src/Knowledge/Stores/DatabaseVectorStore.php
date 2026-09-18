@@ -56,7 +56,7 @@ class DatabaseVectorStore implements KnowledgeStore
             ];
         }
 
-        // One transaction per batch: a document is indexed completely or not at all.
+        // One transaction per batch: the batch is written completely or not at all.
         $this->db()->transaction(function () use ($rows): void {
             foreach (array_chunk($rows, self::INSERT_CHUNK_SIZE) as $batch) {
                 $this->db()->table($this->table)->insert($batch);
@@ -77,6 +77,10 @@ class DatabaseVectorStore implements KnowledgeStore
 
         if ($embedding === []) {
             throw new KnowledgeStoreException('Cannot search the knowledge base with an empty embedding.');
+        }
+
+        if (! $this->hasOnlyFiniteValues($embedding)) {
+            throw new KnowledgeStoreException('Cannot search the knowledge base with a non-finite embedding value.');
         }
 
         // Round-trip through float32 so the query has the stored precision and unpack()'s 1-based keys.
@@ -218,7 +222,23 @@ class DatabaseVectorStore implements KnowledgeStore
                     "All embeddings in a batch must have the same dimensions; got {$dimensions} and {$size}.",
                 );
             }
+
+            if (! $this->hasOnlyFiniteValues($chunk->embedding)) {
+                throw new KnowledgeStoreException("Knowledge chunk from source '{$chunk->source}' has a non-finite embedding value.");
+            }
         }
+    }
+
+    /** Infinity normalises to NaN, and the clamp in score() turns NaN into 1.0, the top relevance. */
+    private function hasOnlyFiniteValues(array $vector): bool
+    {
+        foreach ($vector as $value) {
+            if (! is_finite((float) $value)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** L2-normalises the vector and packs it as little-endian float32. A zero vector stays zero. */

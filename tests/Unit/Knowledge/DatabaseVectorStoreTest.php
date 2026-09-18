@@ -126,6 +126,26 @@ class DatabaseVectorStoreTest extends TestCase
         $this->assertSame(0, DB::table('knowledge_chunks')->count());
     }
 
+    public function test_non_finite_embedding_values_are_rejected(): void
+    {
+        $store = new DatabaseVectorStore();
+
+        foreach ([NAN, INF, -INF] as $value) {
+            try {
+                $store->insert($this->chunk([$value, 0.0]));
+                $this->fail('Expected a KnowledgeStoreException on insert.');
+            } catch (KnowledgeStoreException) {
+            }
+        }
+        $this->assertSame(0, DB::table('knowledge_chunks')->count());
+
+        $store->insert($this->chunk([1.0, 0.0]));
+        $this->expectException(KnowledgeStoreException::class);
+        $this->expectExceptionMessage('non-finite');
+
+        $store->search([NAN, 0.0], 'tenant');
+    }
+
     public function test_zero_vectors_have_zero_relevance(): void
     {
         $store = new DatabaseVectorStore();
