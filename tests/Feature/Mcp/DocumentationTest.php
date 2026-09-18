@@ -24,7 +24,7 @@ final class DocumentationTest extends TestCase
         foreach ([$mcp, $readme, $refactoring, $setup] as $document) {
             self::assertStringContainsString('agent-kit:mcp', $document);
         }
-        foreach (['AGENT_KIT_MCP_ENABLED', 'AGENT_KIT_MCP_TRANSPORT', 'AGENT_KIT_MCP_PROJECT_ROOT', 'AGENT_KIT_MCP_HTTP_HOST', 'AGENT_KIT_MCP_HTTP_PORT', 'AGENT_KIT_MCP_HTTP_PATH', 'AGENT_KIT_MCP_ALLOW_REMOTE', 'AGENT_KIT_MCP_ALLOWED_ORIGINS', 'AGENT_KIT_MCP_BEARER_TOKEN'] as $variable) {
+        foreach (['AGENT_KIT_MCP_ENABLED', 'AGENT_KIT_MCP_TRANSPORT', 'AGENT_KIT_MCP_PROJECT_ROOT', 'AGENT_KIT_MCP_HTTP_PATH', 'AGENT_KIT_MCP_ALLOW_REMOTE', 'AGENT_KIT_MCP_ALLOWED_ORIGINS', 'AGENT_KIT_MCP_BEARER_TOKEN'] as $variable) {
             self::assertStringContainsString($variable, $mcp, $variable);
             self::assertStringContainsString($variable, $env, $variable);
         }

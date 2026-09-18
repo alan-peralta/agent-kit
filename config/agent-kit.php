@@ -340,20 +340,20 @@ return [
 
         'http' => [
             'enabled' => env('AGENT_KIT_MCP_HTTP_ENABLED', false),
-            'host' => env('AGENT_KIT_MCP_HTTP_HOST', '127.0.0.1'),
-            'port' => (int) env('AGENT_KIT_MCP_HTTP_PORT', 8787),
+            // Rota servida pela própria aplicação (php artisan serve, PHP-FPM, Octane)
             'path' => env('AGENT_KIT_MCP_HTTP_PATH', '/mcp'),
-            // Bind fora de loopback exige opt-in explícito; o token continua obrigatório
+            // Aceitar clientes fora de loopback exige opt-in explícito; o token continua obrigatório
             'allow_remote' => (bool) env('AGENT_KIT_MCP_ALLOW_REMOTE', false),
-            // Hosts/origins adicionais permitidos (separados por vírgula); loopback já é permitido
+            // Hosts/origins adicionais permitidos (separados por vírgula); loopback e o host de APP_URL já são permitidos
             'allowed_origins' => env('AGENT_KIT_MCP_ALLOWED_ORIGINS', ''),
             // Mínimo de 32 caracteres. Gere com: php -r 'echo bin2hex(random_bytes(32));'
             'bearer_token' => env('AGENT_KIT_MCP_BEARER_TOKEN'),
             'max_body_bytes' => (int) env('AGENT_KIT_MCP_HTTP_MAX_BODY_BYTES', 1048576),
-            'idle_timeout' => (int) env('AGENT_KIT_MCP_HTTP_IDLE_TIMEOUT', 60),
-            'max_concurrent_requests' => (int) env('AGENT_KIT_MCP_HTTP_MAX_CONCURRENT', 4),
             'session_ttl' => (int) env('AGENT_KIT_MCP_HTTP_SESSION_TTL', 3600),
-            'max_sessions' => (int) env('AGENT_KIT_MCP_HTTP_MAX_SESSIONS', 100),
+            // Store do cache do Laravel para as sessões MCP; vazio = o store padrão da aplicação
+            'cache_store' => env('AGENT_KIT_MCP_HTTP_CACHE_STORE'),
+            // Limite de tempo de cada chamada, em segundos (0 = não mexe no limite do PHP)
+            'time_limit' => (int) env('AGENT_KIT_MCP_HTTP_TIME_LIMIT', 120),
         ],
 
         'index_cache' => [

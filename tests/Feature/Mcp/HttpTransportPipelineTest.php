@@ -9,8 +9,8 @@ use Mcp\Server\Session\InMemorySessionStore;
 use Peralta\AgentKit\Refactoring\Application\RefactoringCapabilities;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
 use Peralta\AgentKit\Refactoring\Mcp\McpServerFactory;
-use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpServerOptions;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportFactory;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportOptions;
 use Peralta\AgentKit\Tests\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\NullLogger;
@@ -183,11 +183,6 @@ final class HttpTransportPipelineTest extends TestCase
         $this->assertNoSecrets($response);
     }
 
-    public function test_unrouted_paths_are_404(): void
-    {
-        self::assertSame(404, $this->send('POST', $this->auth(), $this->initialize(), 'http://127.0.0.1:8787/other')->getStatusCode());
-    }
-
     public function test_unhandled_transport_failures_are_500_without_stack_traces(): void
     {
         $body = FnStream::decorate(\GuzzleHttp\Psr7\Utils::streamFor('{}'), [
@@ -255,12 +250,12 @@ final class HttpTransportPipelineTest extends TestCase
         self::assertStringNotContainsString('#0 ', $body);
     }
 
-    private function httpOptions(array $overrides = []): HttpServerOptions
+    private function httpOptions(array $overrides = []): HttpTransportOptions
     {
-        return HttpServerOptions::fromConfig(array_merge([
-            'enabled' => true, 'host' => '127.0.0.1', 'port' => 8787, 'path' => '/mcp', 'allow_remote' => false,
-            'allowed_origins' => '', 'bearer_token' => self::TOKEN, 'max_body_bytes' => 1048576, 'idle_timeout' => 60,
-            'max_concurrent_requests' => 4, 'session_ttl' => 3600, 'max_sessions' => 100,
+        return HttpTransportOptions::fromConfig(array_merge([
+            'enabled' => true, 'path' => '/mcp', 'allow_remote' => false,
+            'allowed_origins' => '', 'bearer_token' => self::TOKEN, 'max_body_bytes' => 1048576,
+            'session_ttl' => 3600, 'cache_store' => null, 'time_limit' => 120,
         ], $overrides));
     }
 }
