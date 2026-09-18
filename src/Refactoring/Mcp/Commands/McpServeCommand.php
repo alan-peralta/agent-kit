@@ -8,6 +8,7 @@ use Peralta\AgentKit\Exceptions\MissingDependencyException;
 use Peralta\AgentKit\Refactoring\Mcp\McpConfigurationException;
 use Peralta\AgentKit\Refactoring\Mcp\McpLoggerFactory;
 use Peralta\AgentKit\Refactoring\Mcp\McpProjectRoot;
+use Peralta\AgentKit\Refactoring\Mcp\Transport\Http\HttpTransportOptions;
 use Peralta\AgentKit\Refactoring\Mcp\Transport\StdioServerRunner;
 use Psr\Log\LoggerInterface;
 
@@ -17,7 +18,7 @@ final class McpServeCommand extends Command
         {--transport= : stdio or http; defaults to agent-kit.mcp.transport}
         {--path= : Project root to analyze; defaults to agent-kit.mcp.project_root or the Laravel base path}';
 
-    protected $description = 'Serve the Agent Kit refactoring capabilities to MCP clients (stdio or Streamable HTTP)';
+    protected $description = 'Serve the Agent Kit refactoring capabilities to MCP clients over stdio (Streamable HTTP is an application route)';
 
     public function handle(StdioServerRunner $stdio, McpLoggerFactory $loggers): int
     {
@@ -66,7 +67,7 @@ final class McpServeCommand extends Command
      */
     private function httpUnavailableMessage(array $config): string
     {
-        $path = '/' . trim((string) ($config['path'] ?? '/mcp'), '/');
+        $path = HttpTransportOptions::normalizePath((string) ($config['path'] ?? '/mcp'));
 
         return "The Streamable HTTP transport is served by your application at {$path} when AGENT_KIT_MCP_HTTP_ENABLED=true; start it with php artisan serve or your web server. See MCP_SERVER.md.";
     }

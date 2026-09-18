@@ -7,6 +7,7 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Support\Facades\Artisan;
+use Monolog\Handler\TestHandler;
 use Peralta\AgentKit\Agent;
 use Peralta\AgentKit\Tests\TestCase;
 use PHPUnit\Framework\Attributes\CoversNothing;
@@ -40,11 +41,25 @@ final class WithoutOptionalPackagesTest extends TestCase
 
     private const AST_MESSAGE = 'The AST analysis (analyze, callers, dependencies, impact) requires nikic/php-parser. Install it with: composer require --dev nikic/php-parser';
 
+    private const MCP_ROUTE_TOKEN = 'without-optional-packages-token-0123456789abcdef0123456789abcdef';
+
     protected function setUp(): void
     {
         self::hideOptionalPackages();
 
         parent::setUp();
+    }
+
+    protected function defineEnvironment($app): void
+    {
+        // The route is registered at boot, so only the route test turns it on, and before that.
+        if (str_contains($this->name(), 'mcp_route')) {
+            $app['config']->set('agent-kit.mcp.http.enabled', true);
+            $app['config']->set('agent-kit.mcp.http.bearer_token', self::MCP_ROUTE_TOKEN);
+            $app['config']->set('agent-kit.mcp.project_root', $this->fixtureRoot());
+            $app['config']->set('agent-kit.mcp.logging.channel', 'agent-kit-test');
+            $app['config']->set('logging.channels.agent-kit-test', ['driver' => 'monolog', 'handler' => TestHandler::class]);
+        }
     }
 
     public function test_an_agent_sends_through_a_real_provider(): void
@@ -138,6 +153,23 @@ final class WithoutOptionalPackagesTest extends TestCase
     public static function transports(): array
     {
         return ['stdio' => ['stdio'], 'http' => ['http']];
+    }
+
+    public function test_the_mcp_route_answers_the_generic_misconfigured_body_and_logs_the_package_to_install(): void
+    {
+        $response = $this->withHeaders(['Authorization' => 'Bearer ' . self::MCP_ROUTE_TOKEN, 'Accept' => 'application/json, text/event-stream'])
+            ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping']);
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertSame(
+            '{"error":"misconfigured","message":"The MCP HTTP transport is not configured correctly; see the application log."}',
+            $response->getContent(),
+        );
+
+        $handler = $this->app['log']->channel('agent-kit-test')->getLogger()->getHandlers()[0];
+        self::assertTrue($handler->hasErrorThatPasses(
+            static fn ($record): bool => ($record['context']['reason'] ?? null) === 'The MCP server requires mcp/sdk. Install it with: composer require --dev mcp/sdk',
+        ));
     }
 
     private function fixtureRoot(): string

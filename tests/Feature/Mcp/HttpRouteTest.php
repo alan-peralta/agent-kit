@@ -5,6 +5,7 @@ namespace Peralta\AgentKit\Tests\Feature\Mcp;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
+use Monolog\Handler\TestHandler;
 use Peralta\AgentKit\Tests\TestCase;
 
 /**
@@ -161,6 +162,56 @@ final class HttpRouteTest extends TestCase
         );
         self::assertStringNotContainsString('missing', (string) $response->getContent());
         self::assertStringNotContainsString('Cache store', (string) $response->getContent());
+    }
+
+    public function test_a_request_the_psr_conversion_rejects_is_500_with_a_generic_body_even_in_debug_mode(): void
+    {
+        config(['app.debug' => true]);
+
+        // A control character is legal in a Symfony header bag but not in a PSR-7 header value.
+        $response = $this->send('POST', $this->auth(['X-Bad' => "a\x01b"]), $this->initialize());
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertSame(
+            '{"error":"internal_error","message":"The MCP server could not process the request."}',
+            $response->getContent(),
+        );
+        self::assertStringNotContainsString('Exception', (string) $response->getContent());
+        self::assertStringNotContainsString('.php', (string) $response->getContent());
+        self::assertStringNotContainsString('trace', (string) $response->getContent());
+    }
+
+    public function test_the_php_time_limit_is_restored_after_the_call(): void
+    {
+        $original = ini_get('max_execution_time');
+        set_time_limit(0);
+
+        try {
+            self::assertSame(200, $this->send('POST', $this->auth(), $this->initialize())->getStatusCode());
+            self::assertSame('0', ini_get('max_execution_time'));
+        } finally {
+            set_time_limit((int) $original);
+        }
+    }
+
+    public function test_the_default_log_channel_honours_the_mcp_log_level(): void
+    {
+        config([
+            'logging.channels.agent-kit-route-test' => ['driver' => 'monolog', 'handler' => TestHandler::class, 'level' => 'debug'],
+            'logging.default' => 'agent-kit-route-test',
+            'agent-kit.mcp.logging.channel' => null,
+            'agent-kit.mcp.http.bearer_token' => self::SHORT_TOKEN,
+        ]);
+        $handler = $this->app['log']->channel('agent-kit-route-test')->getLogger()->getHandlers()[0];
+        self::assertInstanceOf(TestHandler::class, $handler);
+
+        config(['agent-kit.mcp.logging.level' => 'critical']);
+        self::assertSame(503, $this->send('POST', [], $this->initialize())->getStatusCode());
+        self::assertFalse($handler->hasErrorRecords());
+
+        config(['agent-kit.mcp.logging.level' => 'error']);
+        self::assertSame(503, $this->send('POST', [], $this->initialize())->getStatusCode());
+        self::assertTrue($handler->hasErrorThatContains('The MCP HTTP transport is misconfigured.'));
     }
 
     public function test_bodies_over_the_limit_are_413(): void
