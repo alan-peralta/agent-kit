@@ -235,6 +235,17 @@ final class DefaultRefactoringCapabilities implements RefactoringCapabilities
         if ($file !== null) {
             $relative = $this->relativePath($root, $file);
             $classes = $index->classesInFile($relative);
+            if ($target->method !== null) {
+                // A file that mixes a class with top-level helpers stays a class target; the
+                // script symbol only answers File.php::function when the file has no class.
+                $classLike = array_values(array_filter(
+                    $classes,
+                    static fn (SymbolDefinition $symbol): bool => $symbol->kind !== 'script',
+                ));
+                if ($classLike !== []) {
+                    $classes = $classLike;
+                }
+            }
 
             return [$file, $relative, $classes, true];
         }

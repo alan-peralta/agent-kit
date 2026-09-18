@@ -882,6 +882,93 @@ PHP));
         $this->assertTrue($result->incomplete());
     }
 
+    public function test_scripts_are_reported_as_dependents_and_accepted_as_targets(): void
+    {
+        $this->withProject([
+            'app/Http/Controllers/UserController.php' => '<?php namespace App\Http\Controllers; use App\Services\UserMaker; class UserController { public function __construct(private UserMaker $maker) {} public function index(): void { $this->maker->make(); } }',
+            'app/Services/UserMaker.php' => '<?php namespace App\Services; class UserMaker { public function make(): void {} }',
+            'routes/web.php' => "<?php\nuse App\\Http\\Controllers\\UserController;\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/users', [UserController::class, 'index']);\nRoute::get('/make', function () { \$maker = app(\\App\\Services\\UserMaker::class); return \$maker->make(); });",
+            'app/helpers.php' => "<?php\nuse App\\Services\\UserMaker;\nif (!function_exists('make_user')) {\n    function make_user(UserMaker \$maker): void { \$maker->make(); }\n}",
+        ], function (string $root): void {
+            $callers = $this->service()->findCallers($root, 'App\\Services\\UserMaker::make');
+            $this->assertSame(
+                [['App\\Http\\Controllers\\UserController', 'index'], ['app/helpers.php', 'make_user'], ['routes/web.php', null]],
+                array_map(fn (array $edge) => [$edge['source'], $edge['source_method']], $callers->data['direct_callers']),
+            );
+            $this->assertSame([], $callers->diagnostics);
+
+            $impact = $this->service()->impact($root, 'App\\Services\\UserMaker');
+            $this->assertSame(3, $impact->data['direct_callers']);
+            $this->assertSame(3, $impact->data['affected_files']);
+
+            $dependencies = $this->service()->dependencies($root, 'routes/web.php');
+            $this->assertSame('routes/web.php', $dependencies->data['target']);
+            $this->assertContains('App\\Http\\Controllers\\UserController', array_column($dependencies->data['upstream_dependencies'], 'target'));
+            $this->assertSame([], $dependencies->data['downstream_dependents']);
+            $this->assertSame([], $dependencies->data['transitive_dependents']);
+
+            $routes = $this->service()->analyze($root, 'routes/web.php');
+            $this->assertSame('routes/web.php', $routes->data['target']);
+            $this->assertNull($routes->data['method']);
+            $this->assertContains('App\\Services\\UserMaker', array_column($routes->data['upstream_dependencies'], 'target'));
+
+            $function = $this->service()->analyze($root, 'app/helpers.php::make_user');
+            $this->assertSame('app/helpers.php', $function->data['target']);
+            $this->assertSame('make_user', $function->data['method']);
+        });
+    }
+
+    public function test_a_class_file_with_top_level_code_keeps_class_method_targets_unambiguous(): void
+    {
+        $this->withProject([
+            'app/Support/Clock.php' => "<?php\nnamespace App\\Support;\nclass Clock { public function now(): int { return time(); } }\nClock::class;",
+        ], function (string $root): void {
+            $result = $this->service()->analyze($root, 'app/Support/Clock.php::now');
+
+            $this->assertSame('app/Support/Clock.php', $result->data['target']);
+            $this->assertSame('now', $result->data['method']);
+
+            try {
+                $this->service()->analyze($root, 'app/Support/Clock.php::missing');
+                $this->fail('Expected TARGET_NOT_FOUND.');
+            } catch (CapabilityException $exception) {
+                $this->assertSame('TARGET_NOT_FOUND', $exception->errorCode);
+                $this->assertSame('Method not found: App\\Support\\Clock::missing', $exception->getMessage());
+            }
+        });
+    }
+
+    /** @param array<string, string> $files root-relative path => contents */
+    private function withProject(array $files, callable $test): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-project-' . bin2hex(random_bytes(6));
+        foreach ($files as $path => $code) {
+            $directory = dirname($root . '/' . $path);
+            if (!is_dir($directory)) {
+                mkdir($directory, 0777, true);
+            }
+            file_put_contents($root . '/' . $path, $code);
+        }
+
+        try {
+            $test($root);
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    private function removeDirectory(string $directory): void
+    {
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . '/' . $entry;
+            is_dir($path) ? $this->removeDirectory($path) : unlink($path);
+        }
+        rmdir($directory);
+    }
+
     private function countingParser(): AstParser
     {
         return new class(new PhpAstParser()) implements AstParser {

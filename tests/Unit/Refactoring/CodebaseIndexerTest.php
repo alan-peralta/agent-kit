@@ -276,4 +276,43 @@ PHP);
             rmdir($root);
         }
     }
+
+    public function test_scripts_become_graph_nodes_and_edge_sources(): void
+    {
+        $root = sys_get_temp_dir() . '/agent-kit-index-scripts-' . bin2hex(random_bytes(6));
+        mkdir($root . '/app/Http/Controllers', 0777, true);
+        mkdir($root . '/routes');
+        $files = [
+            '/app/Http/Controllers/UserController.php' => '<?php namespace App\Http\Controllers; class UserController { public function index(): void {} }',
+            '/routes/web.php' => "<?php\nuse App\\Http\\Controllers\\UserController;\nuse Illuminate\\Support\\Facades\\Route;\nRoute::get('/users', [UserController::class, 'index']);",
+            '/app/helpers.php' => "<?php\nuse App\\Http\\Controllers\\UserController;\nfunction user_controller(): UserController { return new UserController(); }",
+        ];
+        foreach ($files as $path => $code) {
+            file_put_contents($root . $path, $code);
+        }
+
+        try {
+            $index = (new CodebaseIndexer(new ProjectScanner(new PhpFileAnalyzer()), new PhpAstParser()))->build($root);
+        } finally {
+            foreach (array_keys($files) as $path) {
+                unlink($root . $path);
+            }
+            foreach (['/routes', '/app/Http/Controllers', '/app/Http', '/app', ''] as $directory) {
+                rmdir($root . $directory);
+            }
+        }
+
+        $this->assertSame([], $index->diagnostics());
+        $this->assertSame('script', $index->findClass('routes/web.php')->kind);
+        $this->assertSame('script', $index->graph()->node('routes/web.php')->kind);
+        $this->assertSame(1, $index->graph()->node('app/helpers.php')->line);
+        $this->assertSame('user_controller', $index->findMethod('app/helpers.php', 'user_controller')['name']);
+        $this->assertSame(['app/helpers.php'], array_map(fn ($symbol) => $symbol->fqcn, $index->classesInFile('app/helpers.php')));
+        $this->assertSame(
+            ['app/helpers.php', 'routes/web.php'],
+            array_values(array_unique(array_map(fn ($edge) => $edge->source, $index->findReferencesTo('App\\Http\\Controllers\\UserController')))),
+        );
+        $this->assertSame([], $index->findReferencesTo('routes/web.php'));
+        $this->assertNotEmpty($index->findDependencies('routes/web.php'));
+    }
 }
