@@ -46,6 +46,7 @@ trait SpawnsMcpServer
     protected function spawn(array $arguments, array $environment = []): array
     {
         $this->placeSkeletonEnvironmentFile();
+        $this->removeSkeletonVendorSymlink();
 
         $process = proc_open(
             array_merge([PHP_BINARY], $arguments),
@@ -166,6 +167,19 @@ trait SpawnsMcpServer
      * CLI skip the `.env.example` copy entirely and load our fixture instead, on every exit path
      * including a SIGKILL that skips Testbench's own cleanup.
      */
+    /**
+     * Start every server the way a fresh checkout (and CI) does: without the skeleton's vendor
+     * symlink. Testbench then creates it at boot and, on the way out, boots a second application
+     * to delete it - a shutdown path that a symlink left behind by an earlier run silently skips.
+     */
+    private function removeSkeletonVendorSymlink(): void
+    {
+        $symlink = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/vendor';
+        if (is_link($symlink) && !@unlink($symlink)) {
+            self::fail("Could not remove the Testbench skeleton vendor symlink at {$symlink}.");
+        }
+    }
+
     private function placeSkeletonEnvironmentFile(): void
     {
         $skeletonEnvironmentFile = $this->skeletonEnvironmentFile();
