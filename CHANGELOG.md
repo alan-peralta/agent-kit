@@ -26,6 +26,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Correção de cabeçalho removido incorretamente e bugs de teste no `QdrantStore`.
 - Guarda no despacho de eventos contra falhas de listeners, aplicando `analytics.enabled` de forma consistente.
 - Carregamento apenas da migration `agent_kit_metrics` nos testes, em vez do diretório completo.
+- `StructureCollector` não quebra mais em código PHP fora de classes nomeadas (closures, `if`, ternários, `??`, `match` no topo do arquivo, funções globais e corpos de classes anônimas): `leaveNode()` passa a espelhar a guarda de `enterNode()`, evitando o esvaziamento das pilhas de escopo que fazia `refactor-analyze`/`callers`/`dependencies`/`impact` falharem em qualquer app Laravel real (`routes/*.php`, `bootstrap/app.php`, migrations). Arquivos sem classe nomeada continuam não contribuindo símbolos nem referências ao índice (comportamento pré-existente).
 
 ### Alterado
 - `GeminiProvider` e `GeminiEmbedder` passam a enviar a chave de API no header `x-goog-api-key` em vez da query string `?key=`, evitando vazamento da credencial em logs de acesso, proxies e históricos de URL.

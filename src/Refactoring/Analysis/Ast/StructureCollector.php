@@ -157,6 +157,34 @@ final class StructureCollector extends NodeVisitorAbstract
 
     public function leaveNode(Node $node): null
     {
+        if ($node instanceof Node\Stmt\ClassLike) {
+            if ($this->currentClass !== null && $this->symbol !== null) {
+                $this->symbols[] = new SymbolDefinition(
+                    $this->currentClass,
+                    $this->symbol['kind'],
+                    $this->file,
+                    $this->symbol['line'],
+                    $this->symbol['methods'],
+                    $this->symbol['properties'],
+                    $this->symbol['constants'],
+                    array_values(array_unique($this->symbol['attributes'])),
+                );
+            }
+
+            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted]
+                = array_pop($this->classStack);
+            $this->nameContext->set($this->currentClass, $this->currentParent);
+
+            return null;
+        }
+
+        // enterNode() skips every node outside a named class (procedural files, top-level
+        // functions, anonymous class bodies), so nothing was pushed for them and popping
+        // here would underflow the scope stacks. Mirror that guard exactly.
+        if ($this->currentClass === null) {
+            return null;
+        }
+
         if ($this->isUncertainControlFlow($node)) {
             $this->leaveUncertainScope();
         }
@@ -178,25 +206,6 @@ final class StructureCollector extends NodeVisitorAbstract
             $this->conditionalScopes = [];
             $this->taintedLocals = [];
             $this->allLocalsTainted = false;
-        }
-
-        if ($node instanceof Node\Stmt\ClassLike) {
-            if ($this->currentClass !== null && $this->symbol !== null) {
-                $this->symbols[] = new SymbolDefinition(
-                    $this->currentClass,
-                    $this->symbol['kind'],
-                    $this->file,
-                    $this->symbol['line'],
-                    $this->symbol['methods'],
-                    $this->symbol['properties'],
-                    $this->symbol['constants'],
-                    array_values(array_unique($this->symbol['attributes'])),
-                );
-            }
-
-            [$this->currentClass, $this->currentParent, $this->currentMethod, $this->symbol, $this->propertyTypes, $this->localTypes, $this->localScopeStack, $this->conditionalScopes, $this->taintedLocals, $this->allLocalsTainted]
-                = array_pop($this->classStack);
-            $this->nameContext->set($this->currentClass, $this->currentParent);
         }
 
         return null;
