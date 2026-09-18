@@ -198,22 +198,32 @@ tests, the subprocess `HttpListenerCommandTest`, and `react/http`.
 `CachedCodebaseIndexer` keeps its in-memory cache and gains an optional
 `IndexSnapshotStore`:
 
-- One file per project root, `<dir>/<sha1(root)>.idx`, holding the fingerprint
-  and the serialized `CodebaseIndex`. A new fingerprint overwrites the file, so
-  disk use is bounded to one snapshot per root.
-- On a memory miss the indexer reads the snapshot; a matching fingerprint
-  returns the unserialized index without rebuilding. A missing, unreadable,
-  corrupt or stale file, or an `unserialize` failure, falls back to a rebuild.
-- Writes go to a temporary file in the same directory and are renamed into
-  place, so a concurrent reader never sees a partial snapshot. A failed write is
-  logged at debug level and otherwise ignored.
+- One file per project root, `<dir>/<sha1(root)>.idx`, holding a header line
+  and the serialized `CodebaseIndex`. The header carries a format number, a
+  hash of the context the service provider passes in (the facade prefixes from
+  `agent-kit.refactoring.facades`, the installed `nikic/php-parser` version and
+  the `peralta/agent-kit` reference, falling back to its version) and the
+  fingerprint. A new fingerprint or context overwrites the file, so disk use is
+  bounded to one snapshot per root.
+- On a memory miss the indexer reads the header first and only reads and
+  unserializes the body when it matches, returning the index without
+  rebuilding. A missing, unreadable, corrupt or stale file, a different
+  context, or an `unserialize` failure, falls back to a rebuild.
+- Writes go to a temporary file in the same directory, made readable according
+  to the process umask (`0666 & ~umask()`, so a CLI user and a PHP-FPM user of
+  the same group can share it), and are renamed into place, so a concurrent
+  reader never sees a partial snapshot. After a successful write, temporary
+  files older than one hour (left by a writer that died) are removed. A failed
+  write is ignored.
 - The file is created by the application in its own storage, like Laravel's
   file cache, and is read with `unserialize()` at the same trust level.
 
-Configuration: `agent-kit.mcp.index_cache.path` (`AGENT_KIT_MCP_INDEX_CACHE_PATH`,
-default `storage_path('framework/cache/agent-kit/index')`; an empty value
-disables snapshots). The CLI commands and the HTTP route benefit; the stdio
-server keeps its in-memory cache and only reads the snapshot on its first call.
+Configuration: `agent-kit.mcp.index_cache.path` (`AGENT_KIT_MCP_INDEX_CACHE_PATH`).
+Unset or empty means the default directory,
+`storage_path('framework/cache/agent-kit/index')`; `false` disables snapshots;
+any other value is the directory. The CLI commands and the HTTP route benefit;
+the stdio server keeps its in-memory cache and only reads the snapshot on its
+first call.
 
 ## Testing
 

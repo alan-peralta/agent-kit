@@ -107,41 +107,43 @@ final class HttpRouteServerTest extends TestCase
     public function test_a_pre_existing_skeleton_env_survives_the_run_unchanged(): void
     {
         $envFile = $this->packageRoot() . '/vendor/orchestra/testbench-core/laravel/.env';
+        // The sentinel stands in for a developer's own file; a real one already there is kept aside.
+        $developerEnv = is_file($envFile) ? (string) file_get_contents($envFile) : null;
         $sentinel = "SENTINEL_DEVELOPER_ENV=do-not-lose-me\nDB_CONNECTION=sqlite\n";
         file_put_contents($envFile, $sentinel);
 
-        $port = $this->freePort();
-        $this->startServer($port);
-
-        // A light sanity check that the server is really up and serving our config, not just that
-        // the port happened to accept a connection.
-        $client = new Client(['http_errors' => false, 'timeout' => 10, 'connect_timeout' => 5]);
-        $response = $client->post("http://127.0.0.1:{$port}/mcp", [
-            'headers' => ['Accept' => 'application/json, text/event-stream', 'Content-Type' => 'application/json'],
-            'body' => $this->initialize(),
-        ]);
-        self::assertSame(401, $response->getStatusCode());
-
-        // Stop and restore now, inside the test, so the byte-for-byte assertion below runs
-        // against the actually-restored file rather than after PHPUnit has already moved on.
-        $this->stopServer();
-
         try {
+            $port = $this->freePort();
+            $this->startServer($port);
+
+            // A light sanity check that the server is really up and serving our config, not just that
+            // the port happened to accept a connection.
+            $client = new Client(['http_errors' => false, 'timeout' => 10, 'connect_timeout' => 5]);
+            $response = $client->post("http://127.0.0.1:{$port}/mcp", [
+                'headers' => ['Accept' => 'application/json, text/event-stream', 'Content-Type' => 'application/json'],
+                'body' => $this->initialize(),
+            ]);
+            self::assertSame(401, $response->getStatusCode());
+
+            // Stop and restore now, inside the test, so the byte-for-byte assertion below runs
+            // against the actually-restored file rather than after PHPUnit has already moved on.
+            $this->stopServer();
+
             self::assertSame(
                 $sentinel,
                 file_get_contents($envFile),
                 'A pre-existing skeleton .env must survive the test run byte-for-byte.',
             );
         } finally {
-            // The sentinel above simulates a developer's pre-existing file only for this proof;
-            // it was never a real one, so - unlike stopServer()'s restore behaviour for an actual
-            // pre-existing file, which is exactly what was just verified above - this test removes
-            // it once that proof is done, so the repository ends the run with no skeleton .env at
-            // all, matching SpawnsMcpServer's own expectations. envFile is cleared first so
-            // tearDown()'s own stopServer() call, which still runs after this method returns, does
-            // not restore (and thereby resurrect) it a second time.
+            // Stops a server a failed assertion left running (and puts the sentinel back), then
+            // replaces the sentinel with whatever was there before this test: the developer's own
+            // file byte-for-byte, or nothing. envFile is cleared first so tearDown()'s own
+            // stopServer() does not restore the sentinel a second time.
+            $this->stopServer();
             $this->envFile = null;
-            if (is_file($envFile) && file_get_contents($envFile) === $sentinel) {
+            if ($developerEnv !== null) {
+                file_put_contents($envFile, $developerEnv);
+            } elseif (is_file($envFile) && file_get_contents($envFile) === $sentinel) {
                 @unlink($envFile);
             }
         }
@@ -179,6 +181,7 @@ final class HttpRouteServerTest extends TestCase
             'AGENT_KIT_MCP_BEARER_TOKEN=' . self::TOKEN,
             'AGENT_KIT_MCP_PROJECT_ROOT=' . $this->fixtureRoot(),
             'CACHE_STORE=file',
+            'AGENT_KIT_MCP_INDEX_CACHE_PATH=false',
             '',
         ]);
         file_put_contents($this->envFile, $this->writtenEnvContents);

@@ -361,7 +361,7 @@ return [
             'max_entries' => (int) env('AGENT_KIT_MCP_INDEX_CACHE_MAX_ENTRIES', 1),
 
             // Snapshot em disco do índice AST, reaproveitado entre processos (CLI, rota HTTP).
-            // Vazio desliga; null = storage/framework/cache/agent-kit/index
+            // null ou vazio = storage/framework/cache/agent-kit/index; false desliga
             'path' => env('AGENT_KIT_MCP_INDEX_CACHE_PATH'),
         ],
 

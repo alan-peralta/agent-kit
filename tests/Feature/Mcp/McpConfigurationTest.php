@@ -34,7 +34,7 @@ final class McpConfigurationTest extends TestCase
 
     public function test_the_package_default_for_the_index_cache_path_is_null(): void
     {
-        // TestCase::getEnvironmentSetUp() overrides this to '' so tests never share snapshots;
+        // TestCase::getEnvironmentSetUp() overrides this to false so tests never share snapshots;
         // read the shipped config file directly to check the package's own default.
         $config = require __DIR__ . '/../../../config/agent-kit.php';
 

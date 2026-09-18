@@ -46,6 +46,56 @@ final class IndexSnapshotStoreTest extends TestCase
         self::assertNull($store->read('/project-b', 'fingerprint'));
     }
 
+    public function test_a_different_context_reads_null(): void
+    {
+        $directory = $this->directory();
+        $index = $this->index();
+        (new IndexSnapshotStore($directory, 'context-a'))->write('/project', 'fingerprint', $index);
+
+        self::assertNull((new IndexSnapshotStore($directory, 'context-b'))->read('/project', 'fingerprint'));
+        self::assertEquals($index, (new IndexSnapshotStore($directory, 'context-a'))->read('/project', 'fingerprint'));
+    }
+
+    public function test_a_file_without_a_header_line_reads_null(): void
+    {
+        $directory = $this->directory();
+        mkdir($directory, 0777, true);
+        file_put_contents($directory . '/' . sha1('/project') . '.idx', str_repeat('x', 65536));
+
+        self::assertNull((new IndexSnapshotStore($directory))->read('/project', 'fingerprint'));
+    }
+
+    public function test_the_snapshot_file_mode_follows_the_umask(): void
+    {
+        $directory = $this->directory();
+        $previous = umask(0002);
+
+        try {
+            (new IndexSnapshotStore($directory))->write('/project', 'fingerprint', $this->index());
+        } finally {
+            umask($previous);
+        }
+
+        clearstatcache();
+        self::assertSame(0664, fileperms($directory . '/' . sha1('/project') . '.idx') & 0777);
+    }
+
+    public function test_a_successful_write_removes_temporary_files_older_than_an_hour(): void
+    {
+        $directory = $this->directory();
+        mkdir($directory, 0777, true);
+        touch($directory . '/index-stale', time() - 7200);
+        touch($directory . '/index-fresh');
+        touch($directory . '/unrelated-stale', time() - 7200);
+
+        (new IndexSnapshotStore($directory))->write('/project', 'fingerprint', $this->index());
+
+        self::assertFileDoesNotExist($directory . '/index-stale');
+        self::assertFileExists($directory . '/index-fresh');
+        self::assertFileExists($directory . '/unrelated-stale');
+        self::assertFileExists($directory . '/' . sha1('/project') . '.idx');
+    }
+
     public function test_a_corrupt_snapshot_reads_null_without_a_warning(): void
     {
         $directory = $this->directory();

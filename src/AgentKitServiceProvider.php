@@ -2,8 +2,10 @@
 
 namespace Peralta\AgentKit;
 
+use Composer\InstalledVersions;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use OutOfBoundsException;
 use Peralta\AgentKit\ErrorRecovery\Classifiers\DefaultErrorClassifier;
 use Peralta\AgentKit\ErrorRecovery\Contracts\AlertNotifier;
 use Peralta\AgentKit\ErrorRecovery\Middleware\DiscordAlertMiddleware;
@@ -310,8 +312,12 @@ class AgentKitServiceProvider extends ServiceProvider
         ));
         // One cache per process: the MCP server keeps it for its whole life, the CLI for one command.
         $this->app->singleton(CachedCodebaseIndexer::class, function ($app) {
+            // false disables the snapshot; null or an empty value (as .env.example ships it) is the default directory.
             $path = config('agent-kit.mcp.index_cache.path');
-            $snapshots = $path === '' ? null : new IndexSnapshotStore($path ?? storage_path('framework/cache/agent-kit/index'));
+            $snapshots = $path === false ? null : new IndexSnapshotStore(
+                is_string($path) && $path !== '' ? $path : storage_path('framework/cache/agent-kit/index'),
+                $this->indexSnapshotContext(),
+            );
 
             return new CachedCodebaseIndexer(
                 $app->make(CodebaseIndexer::class),
@@ -347,6 +353,22 @@ class AgentKitServiceProvider extends ServiceProvider
             $app->make(AgentCommandRepository::class),
             $app->make(AgentTemplateRenderer::class),
         ));
+    }
+
+    /** Everything besides the analysed files that shapes the index, so a change invalidates old snapshots. */
+    private function indexSnapshotContext(): string
+    {
+        try {
+            $package = InstalledVersions::getReference('peralta/agent-kit') ?? InstalledVersions::getPrettyVersion('peralta/agent-kit') ?? 'dev';
+        } catch (OutOfBoundsException) {
+            $package = 'dev';
+        }
+
+        return (string) json_encode([
+            'facades' => config('agent-kit.refactoring.facades', ['Illuminate\\Support\\Facades\\']),
+            'agent-kit' => $package,
+            'php-parser' => InstalledVersions::isInstalled('nikic/php-parser') ? InstalledVersions::getPrettyVersion('nikic/php-parser') : null,
+        ]);
     }
 
     protected function registerAnalytics(): void
